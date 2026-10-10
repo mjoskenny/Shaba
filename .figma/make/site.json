@@ -1,0 +1,10 @@
+{
+  "description": "Showcase and sell premium leather products through a modern, minimalist online store designed for a seamless shopping experience in Burundi.",
+  "robots": {
+    "index": true
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
