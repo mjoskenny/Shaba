@@ -133,8 +133,8 @@ export default function App() {
         <div className="mx-auto max-w-[1440px]">
           <div className="mb-10 flex flex-col justify-between gap-8 sm:flex-row sm:items-end" data-reveal>
             <div>
-              <span className="eyebrow text-brass">Essentials, elevated</span>
-              <h2 className="mt-4 font-serif text-5xl text-brass sm:text-6xl">{audience} · {activeCategory}</h2>
+              <span className="eyebrow text-forest">Essentials, elevated</span>
+              <h2 className="mt-4 font-serif text-5xl text-forest sm:text-6xl">{audience} · {activeCategory}</h2>
               <div className="palette-rule mt-6" aria-hidden="true">
                 <i />
                 <i />
