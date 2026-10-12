@@ -14,6 +14,12 @@ const Arrow = ({ diagonal = false }: { diagonal?: boolean }) => (
   </svg>
 );
 
+const GridViewIcon = ({ columns }: { columns: 1 | 2 | 3 | 4 }) => (
+  <span aria-hidden="true" className={`grid-view-icon grid-view-icon-${columns}`}>
+    {Array.from({ length: columns * 2 }, (_, index) => <i key={index} />)}
+  </span>
+);
+
 const NavIcon = ({ name }: { name: "bag" | "menu" | "close" }) => {
   const paths = {
     bag: (
@@ -150,11 +156,19 @@ export function ShopPage() {
   const { products, loading } = useProducts();
   const [audience, setAudience] = useState<"Women" | "Men">("Women");
   const [category, setCategory] = useState("New arrivals");
+  const [productColumns, setProductColumns] = useState<2 | 3 | 4>(4);
+  const [mobileColumns, setMobileColumns] = useState<1 | 2>(2);
   const audienceProducts = products.filter((product) => product.audience.includes(audience));
   const categories = ["New arrivals", ...Array.from(new Set(audienceProducts.map((product) => product.category)))];
   const visibleProducts = category === "New arrivals"
     ? audienceProducts
     : audienceProducts.filter((product) => product.category === category);
+  const mobileGridClass = mobileColumns === 1 ? "grid-cols-1" : "grid-cols-2";
+  const desktopGridClass = productColumns === 2
+    ? "sm:grid-cols-2"
+    : productColumns === 3
+      ? "sm:grid-cols-3"
+      : "sm:grid-cols-4";
 
   const selectAudience = (value: "Women" | "Men") => {
     setAudience(value);
@@ -166,7 +180,7 @@ export function ShopPage() {
       <PageIntro eyebrow="The collection" title="Objects made to travel through life." copy="Functional leather pieces designed in Bujumbura, cut with intention, and finished by skilled hands." />
       <section className="px-5 pb-24 pt-10 sm:px-8 lg:px-14 lg:pb-32 lg:pt-14">
         <div className="mx-auto max-w-[1440px]">
-          <div className="mb-10 flex justify-center gap-2">
+          <div className="mb-10 flex justify-center gap-2" aria-label="Filter by audience">
             {(["Women", "Men"] as const).map((item) => (
               <button
                 aria-pressed={audience === item}
@@ -178,7 +192,51 @@ export function ShopPage() {
               </button>
             ))}
           </div>
-          <div className="collection-tabs mb-12">
+
+          <div className="mb-10 flex flex-col justify-between gap-8 sm:flex-row sm:items-end">
+            <div>
+              <span className="eyebrow text-forest">Essentials, elevated</span>
+              <h2 className="mt-4 font-serif text-5xl text-forest sm:text-6xl">{audience} · {category}</h2>
+              <div className="palette-rule mt-6" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+                <i />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-7">
+              <div className="flex items-center gap-2 sm:hidden" aria-label="Products per row on mobile">
+                <span className="mr-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-forest/50">View</span>
+                {([1, 2] as const).map((columns) => (
+                  <button
+                    aria-label={`Show ${columns} product${columns > 1 ? "s" : ""} per row`}
+                    aria-pressed={mobileColumns === columns}
+                    className={`view-option ${mobileColumns === columns ? "view-option-active" : ""}`}
+                    key={columns}
+                    onClick={() => setMobileColumns(columns)}
+                  >
+                    <GridViewIcon columns={columns} />
+                  </button>
+                ))}
+              </div>
+              <div className="hidden items-center gap-2 sm:flex" aria-label="Products per row on desktop">
+                <span className="mr-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-forest/50">View</span>
+                {([2, 3, 4] as const).map((columns) => (
+                  <button
+                    aria-label={`Show ${columns} products per row`}
+                    aria-pressed={productColumns === columns}
+                    className={`view-option ${productColumns === columns ? "view-option-active" : ""}`}
+                    key={columns}
+                    onClick={() => setProductColumns(columns)}
+                  >
+                    <GridViewIcon columns={columns} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="collection-tabs mb-10 lg:mb-14">
             {categories.map((item) => (
               <button
                 className={`collection-tab ${category === item ? "collection-tab-active" : ""}`}
@@ -191,7 +249,7 @@ export function ShopPage() {
             ))}
           </div>
           {loading && <p className="mb-8 text-center text-xs uppercase tracking-[0.18em] text-forest/50">Refreshing collection</p>}
-          <div className="grid gap-x-5 gap-y-12 sm:grid-cols-2 lg:grid-cols-4">
+          <div className={`grid ${mobileGridClass} ${desktopGridClass} gap-x-5 gap-y-12`}>
             {visibleProducts.map((product) => (
               <ProductCard key={product.slug} product={product} />
             ))}
