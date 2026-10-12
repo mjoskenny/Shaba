@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import type { Product } from "../data";
+import { normalizeProductSizes, type Product } from "../data";
 import { adminApi, type OrderRecord } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import type { JournalEntry } from "../journals";
@@ -39,6 +39,7 @@ export default function AdminPage() {
   const [journals, setJournals] = useState<JournalEntry[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [sizesInput, setSizesInput] = useState("");
   const [editingJournal, setEditingJournal] = useState<JournalEntry | null>(null);
   const [originalSlug, setOriginalSlug] = useState<string>();
   const [uploading, setUploading] = useState(false);
@@ -89,7 +90,7 @@ export default function AdminPage() {
     event.preventDefault();
     if (!editing) return;
     try {
-      await adminApi.saveProduct(editing, originalSlug);
+      await adminApi.saveProduct({ ...editing, sizes: normalizeProductSizes(sizesInput) }, originalSlug);
       setEditing(null);
       setOriginalSlug(undefined);
       await loadDashboard();
@@ -154,6 +155,41 @@ export default function AdminPage() {
     }
   };
 
+  const uploadProductImages = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    setMessage("Uploading product images…");
+    try {
+      const uploaded = await Promise.all(Array.from(files, (file) => adminApi.uploadImage(file)));
+      setEditing((current) => {
+        if (!current) return current;
+        const nextImages = [...(current.images ?? []), ...uploaded.map(({ url }) => url).filter((url) => url !== current.image)];
+        return { ...current, image: current.image || nextImages.shift() || "", images: nextImages };
+      });
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to upload product images");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const setProductCover = (image: string) => {
+    setEditing((current) => current ? {
+      ...current,
+      image,
+      images: [...(current.images ?? []).filter((url) => url !== image), ...(current.image && current.image !== image ? [current.image] : [])],
+    } : current);
+  };
+
+  const removeProductImage = (image: string) => {
+    setEditing((current) => {
+      if (!current) return current;
+      const remaining = [current.image, ...(current.images ?? [])].filter((url) => url && url !== image);
+      return { ...current, image: remaining[0] ?? "", images: remaining.slice(1) };
+    });
+  };
+
   if (!session) {
     return (
       <main className="grid min-h-screen bg-forest px-5 py-16 text-sand lg:grid-cols-2">
@@ -213,7 +249,7 @@ export default function AdminPage() {
           <section className="mt-8">
             <div className="mb-5 flex items-center justify-between">
               <p className="text-sm text-forest/60">{products.length} products</p>
-              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold" onClick={() => { setEditing({ ...emptyProduct }); setOriginalSlug(undefined); }}>Add product</button>
+              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold" onClick={() => { setEditing({ ...emptyProduct }); setSizesInput(normalizeProductSizes(emptyProduct.sizes).join(", ")); setOriginalSlug(undefined); }}>Add product</button>
             </div>
             <div className="overflow-x-auto rounded-2xl bg-white">
               <table className="w-full min-w-[760px] text-left text-sm">
@@ -227,7 +263,7 @@ export default function AdminPage() {
                       <td>{product.category}</td><td>{product.price}</td><td>{product.inventory ?? 0}</td>
                       <td><span className={`rounded-full px-3 py-1 text-[10px] ${product.published === false ? "bg-brass/10 text-brass" : "bg-olive/10 text-olive"}`}>{product.published === false ? "Draft" : "Published"}</span></td>
                       <td className="pr-5 text-right">
-                        <button className="mr-4 text-xs font-semibold" onClick={() => { setEditing({ ...product }); setOriginalSlug(product.slug); }}>Edit</button>
+                        <button className="mr-4 text-xs font-semibold" onClick={() => { setEditing({ ...product }); setSizesInput(normalizeProductSizes(product.sizes).join(", ")); setOriginalSlug(product.slug); }}>Edit</button>
                         <button className="text-xs text-brass" onClick={() => removeProduct(product.slug)}>Delete</button>
                       </td>
                     </tr>
@@ -308,11 +344,22 @@ export default function AdminPage() {
                 </select>
               </label>
             </div>
-            <AdminField label="Size variants (comma separated)" value={(editing.sizes ?? []).join(", ")} onChange={(sizes) => setEditing({ ...editing, sizes: sizes.split(",").map((size) => size.trim()).filter(Boolean) })} />
-            <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Product image
-              <input accept="image/*" className="mt-2 block w-full rounded-xl border border-forest/15 p-4 text-xs" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadImage(file, (image) => setEditing({ ...editing, image })); }} type="file" />
+            <AdminField label="Size variants (comma separated)" value={sizesInput} onChange={setSizesInput} />
+            <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Product images
+              <span className="mt-1 block normal-case tracking-normal text-forest/50">Add multiple photos. Choose which one appears as the main product image.</span>
+              <input accept="image/*" className="mt-2 block w-full rounded-xl border border-forest/15 p-4 text-xs" disabled={uploading} multiple onChange={(event) => { uploadProductImages(event.target.files); event.currentTarget.value = ""; }} type="file" />
             </label>
-            {editing.image && <img alt="Product preview" className="mt-4 aspect-[16/9] w-full rounded-xl object-cover" src={editing.image} />}
+            {!!(editing.image || editing.images?.length) && <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {[editing.image, ...(editing.images ?? [])].filter(Boolean).map((image, index) => (
+                <div className="overflow-hidden rounded-xl border border-forest/10 bg-white p-2" key={`${image}-${index}`}>
+                  <img alt={index === 0 ? "Main product preview" : `Product image ${index + 1}`} className="aspect-square w-full rounded-lg object-cover" src={image} />
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    {index === 0 ? <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-olive">Main image</span> : <button className="text-[9px] font-semibold underline" onClick={() => setProductCover(image)} type="button">Set as main</button>}
+                    <button aria-label={`Remove product image ${index + 1}`} className="text-[9px] text-brass underline" onClick={() => removeProductImage(image)} type="button">Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>}
             <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Description
               <textarea className="mt-2 min-h-32 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setEditing({ ...editing, description: event.target.value })} value={editing.description} />
             </label>

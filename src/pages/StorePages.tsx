@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useParams } from "react-router";
 import ProductCard from "../components/ProductCard";
 import AnnouncementBar from "../components/AnnouncementBar";
-import { craftImages, products as fallbackProducts, type Product } from "../data";
+import { craftImages, normalizeProductSizes, products as fallbackProducts, type Product } from "../data";
 import { useProducts } from "../hooks/useProducts";
 import { createOrder, getJournal, getJournals, getProduct } from "../lib/api";
 import { addCartItem, clearCart, getCart, getCartCount, removeCartItem, updateCartItem, type CartItem } from "../lib/cart";
@@ -271,16 +271,21 @@ export function ProductDetailPage() {
   const [product, setProduct] = useState<Product | null>(
     fallbackProducts.find((item) => item.slug === slug) ?? null,
   );
+  const [activeImage, setActiveImage] = useState("");
   const [added, setAdded] = useState(false);
   const [selectedSize, setSelectedSize] = useState("");
 
   useEffect(() => {
     if (!slug) return;
     let active = true;
+    setSelectedSize("");
+    setAdded(false);
     getProduct(slug).then((item) => {
       if (active) {
         setProduct(item);
-        if (item?.sizes?.length === 1) setSelectedSize(item.sizes[0]);
+        const sizes = normalizeProductSizes(item?.sizes);
+        setSelectedSize(sizes.length === 1 ? sizes[0] : "");
+        setActiveImage(item?.image ?? "");
       }
     });
     return () => {
@@ -290,13 +295,29 @@ export function ProductDetailPage() {
 
   if (!product) return <NotFoundPage />;
 
+  const galleryImages = [...new Set([product.image, ...(product.images ?? [])].filter(Boolean))];
+  const availableSizes = normalizeProductSizes(product.sizes);
+  const displayedImage = galleryImages.includes(activeImage) ? activeImage : product.image;
+
   return (
     <main>
       <section className="grid lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="grid gap-2 bg-[#e4ded2] p-2 sm:grid-cols-2">
-          <img alt={product.name} className="aspect-[4/5] size-full object-cover sm:col-span-2" src={product.image} />
-          <img alt="Hand tools used to finish SHABA leather goods" className="aspect-square size-full object-cover" src={craftImages.detail} />
-          <img alt="Leather craft bench in the SHABA workshop" className="aspect-square size-full object-cover" src={craftImages.bench} />
+        <div className="bg-[#e4ded2] p-3 sm:p-5 lg:p-8">
+          <img alt={product.name} className="aspect-[4/5] max-h-[78vh] w-full object-cover" src={displayedImage} />
+          {galleryImages.length > 1 && <div aria-label={`${product.name} images`} className="mt-3 flex gap-3 overflow-x-auto pb-1 sm:mt-4 sm:gap-4">
+            {galleryImages.map((image, index) => (
+              <button
+                aria-label={`Show ${product.name} image ${index + 1}`}
+                aria-pressed={displayedImage === image}
+                className={`size-16 shrink-0 overflow-hidden border-2 transition-colors sm:size-20 ${displayedImage === image ? "border-forest" : "border-transparent opacity-70 hover:opacity-100"}`}
+                key={`${image}-${index}`}
+                onClick={() => setActiveImage(image)}
+                type="button"
+              >
+                <img alt="" className="size-full object-cover" src={image} />
+              </button>
+            ))}
+          </div>}
         </div>
         <div className="flex items-start px-6 py-14 sm:px-12 lg:sticky lg:top-24 lg:h-[calc(100vh-6rem)] lg:items-center lg:px-16">
           <div className="w-full max-w-xl">
@@ -307,7 +328,7 @@ export function ProductDetailPage() {
             <div className="mt-9 border-y border-forest/15 py-6">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em]">Choose size</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                {(product.sizes?.length ? product.sizes : ["One size"]).map((size) => (
+                {availableSizes.map((size) => (
                   <button
                     aria-pressed={selectedSize === size}
                     className={`min-w-11 rounded-full border px-4 py-3 text-xs transition-colors ${selectedSize === size ? "border-forest bg-forest text-sand" : "border-forest/25 hover:bg-forest hover:text-sand"}`}
