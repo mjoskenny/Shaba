@@ -6,4 +6,6 @@ export const supabase = createClient(
   publicAnonKey,
 );
 
+export const supabaseAnonKey = publicAnonKey;
+
 export const apiBase = `https://${projectId}.supabase.co/functions/v1/make-server-16e069d6`;
