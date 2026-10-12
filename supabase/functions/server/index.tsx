@@ -136,7 +136,9 @@ async function requireAdmin(c: any) {
     Deno.env.get("SUPABASE_ANON_KEY")!,
   );
   const { data, error } = await client.auth.getUser(token);
-  return error ? null : data.user;
+  if (error || !data.user) return null;
+  const appMetadata = data.user.app_metadata ?? {};
+  return appMetadata.role === "admin" || appMetadata.is_admin === true ? data.user : null;
 }
 
 app.get(`${prefix}/products`, async (c) => {
@@ -177,14 +179,30 @@ app.get(`${prefix}/journals/:slug`, async (c) => {
 app.post(`${prefix}/orders`, async (c) => {
   try {
     const input = await c.req.json();
-    if (!Array.isArray(input.items) || !input.items.length) {
-      return c.json({ error: "An order requires at least one item" }, 400);
+    if (!Array.isArray(input.items) || !input.items.length || input.items.some((item: any) =>
+      !item || typeof item.slug !== "string" || typeof item.name !== "string" ||
+      !Number.isInteger(item.quantity) || item.quantity < 1 || typeof item.size !== "string"
+    )) {
+      return c.json({ error: "An order requires valid items" }, 400);
     }
+    const customer = input.customer;
+    if (!customer || typeof customer.name !== "string" || !customer.name.trim() ||
+      typeof customer.phone !== "string" || !customer.phone.trim() ||
+      typeof customer.fulfillment !== "string"
+    ) return c.json({ error: "Name, phone, and fulfillment are required" }, 400);
+
     const id = crypto.randomUUID();
     const order = {
       id,
       items: input.items,
       total: input.total ?? "",
+      customer: {
+        name: customer.name.trim(),
+        phone: customer.phone.trim(),
+        fulfillment: customer.fulfillment,
+        area: typeof customer.area === "string" ? customer.area.trim() : "",
+        note: typeof customer.note === "string" ? customer.note.trim() : "",
+      },
       status: "new",
       createdAt: new Date().toISOString(),
     };

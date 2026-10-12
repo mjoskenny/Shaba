@@ -33,6 +33,7 @@ export default function AdminPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [journalApiError, setJournalApiError] = useState("");
   const [tab, setTab] = useState<"products" | "journals" | "orders">("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [journals, setJournals] = useState<JournalEntry[]>([]);
@@ -43,15 +44,28 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
 
   const loadDashboard = async () => {
-    try {
-      const [catalog, journalList, orderList] = await Promise.all([adminApi.products(), adminApi.journals(), adminApi.orders()]);
-      setProducts(catalog);
-      setJournals(journalList);
-      setOrders(orderList.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
-      setMessage("");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load dashboard");
+    const [catalogResult, journalResult, orderResult] = await Promise.allSettled([
+      adminApi.products(),
+      adminApi.journals(),
+      adminApi.orders(),
+    ]);
+
+    if (catalogResult.status === "fulfilled") setProducts(catalogResult.value);
+    if (orderResult.status === "fulfilled") {
+      setOrders(orderResult.value.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     }
+    if (journalResult.status === "fulfilled") {
+      setJournals(journalResult.value);
+      setJournalApiError("");
+    } else {
+      setJournals([]);
+      setJournalApiError(journalResult.reason instanceof Error ? journalResult.reason.message : "Unable to load journal stories");
+    }
+
+    const dashboardError = [catalogResult, orderResult].find((result) => result.status === "rejected");
+    setMessage(dashboardError?.status === "rejected"
+      ? dashboardError.reason instanceof Error ? dashboardError.reason.message : "Unable to load dashboard"
+      : "");
   };
 
   useEffect(() => {
@@ -109,8 +123,21 @@ export default function AdminPage() {
 
   const removeJournal = async (slug: string) => {
     if (!window.confirm("Remove this journal story?")) return;
-    await adminApi.deleteJournal(slug);
-    await loadDashboard();
+    try {
+      await adminApi.deleteJournal(slug);
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to remove journal story");
+    }
+  };
+
+  const updateOrderStatus = async (id: string, status: string) => {
+    try {
+      await adminApi.updateOrder(id, status);
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update order");
+    }
   };
 
   const uploadImage = async (file: File, onComplete: (url: string) => void) => {
@@ -211,9 +238,10 @@ export default function AdminPage() {
           </section>
         ) : tab === "journals" ? (
           <section className="mt-8">
+            {journalApiError && <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border border-brass/30 bg-brass/10 p-4 text-sm"><span>Journal management is unavailable: {journalApiError}. Deploy the latest Supabase Edge Function to enable it.</span><button className="font-semibold underline" onClick={loadDashboard}>Retry</button></div>}
             <div className="mb-5 flex items-center justify-between">
               <p className="text-sm text-forest/60">{journals.length} journal stories</p>
-              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold" onClick={() => { setEditingJournal({ ...emptyJournal, body: [""] }); setOriginalSlug(undefined); }}>Add story</button>
+              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50" disabled={Boolean(journalApiError)} onClick={() => { setEditingJournal({ ...emptyJournal, body: [""] }); setOriginalSlug(undefined); }}>Add story</button>
             </div>
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
               {journals.map((journal) => (
@@ -224,8 +252,8 @@ export default function AdminPage() {
                     <h3 className="mt-2 font-serif text-2xl">{journal.title}</h3>
                     <p className="mt-3 line-clamp-2 text-xs leading-5 text-forest/55">{journal.excerpt}</p>
                     <div className="mt-6 flex justify-between">
-                      <button className="text-xs font-semibold" onClick={() => { setEditingJournal({ ...journal, body: [...journal.body] }); setOriginalSlug(journal.slug); }}>Edit</button>
-                      <button className="text-xs text-brass" onClick={() => removeJournal(journal.slug)}>Delete</button>
+                      <button className="text-xs font-semibold" disabled={Boolean(journalApiError)} onClick={() => { setEditingJournal({ ...journal, body: [...journal.body] }); setOriginalSlug(journal.slug); }}>Edit</button>
+                      <button className="text-xs text-brass" disabled={Boolean(journalApiError)} onClick={() => removeJournal(journal.slug)}>Delete</button>
                     </div>
                   </div>
                 </article>
@@ -237,14 +265,22 @@ export default function AdminPage() {
             {!orders.length && <div className="rounded-2xl bg-white p-12 text-center"><h3 className="font-serif text-3xl">No orders yet</h3><p className="mt-3 text-sm text-forest/55">New orders will appear here.</p></div>}
             {orders.map((order) => (
               <article className="grid items-center gap-5 rounded-2xl bg-white p-6 sm:grid-cols-[1fr_1fr_auto]" key={order.id}>
-                <div><p className="text-[9px] uppercase tracking-[0.16em] text-brass">Order {order.id.slice(0, 8)}</p><p className="mt-2 text-sm">{new Date(order.createdAt).toLocaleString()}</p></div>
+                <div>
+                  <p className="text-[9px] uppercase tracking-[0.16em] text-brass">Order {order.id.slice(0, 8)}</p>
+                  <p className="mt-2 text-sm">{new Date(order.createdAt).toLocaleString()}</p>
+                  {order.customer && <div className="mt-3 space-y-1 text-xs text-forest/60">
+                    <p>{order.customer.name} · {order.customer.phone}</p>
+                    <p>{order.customer.fulfillment}{order.customer.area ? ` · ${order.customer.area}` : ""}</p>
+                    {order.customer.note && <p>Note: {order.customer.note}</p>}
+                  </div>}
+                </div>
                 <div>
                   <p className="font-semibold">{order.total}</p>
                   <div className="mt-2 space-y-1 text-xs text-forest/55">
                     {order.items.map((item, index) => <p key={`${item.name}-${index}`}>{item.name} · {item.size ?? "One size"} × {item.quantity}</p>)}
                   </div>
                 </div>
-                <select className="rounded-full border border-forest/15 bg-transparent px-4 py-3 text-xs" onChange={async (event) => { await adminApi.updateOrder(order.id, event.target.value); await loadDashboard(); }} value={order.status}>
+                <select className="rounded-full border border-forest/15 bg-transparent px-4 py-3 text-xs" onChange={(event) => updateOrderStatus(order.id, event.target.value)} value={order.status}>
                   {["new", "confirmed", "making", "ready", "completed", "cancelled"].map((status) => <option key={status}>{status}</option>)}
                 </select>
               </article>

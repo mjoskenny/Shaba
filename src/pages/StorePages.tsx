@@ -570,20 +570,45 @@ export function CartPage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
+  const [orderSaveWarning, setOrderSaveWarning] = useState("");
+  const [savedOrderId, setSavedOrderId] = useState("");
   const [checkout, setCheckout] = useState({ name: "", phone: "", fulfillment: "Pickup in Bujumbura", area: "", note: "" });
   const totalValue = items.reduce((sum, item) => sum + Number(item.product.price.replace(/\D/g, "")) * item.quantity, 0);
   const total = `${new Intl.NumberFormat("en-US").format(totalValue)} BIF`;
 
   const submitOrder = async (event: React.FormEvent) => {
     event.preventDefault();
+    setCheckoutError("");
+    setOrderSaveWarning("");
     setSubmitting(true);
     const whatsappWindow = window.open("about:blank", "_blank");
     const productLines = items.map((item) => [
       `• ${item.product.name} · Size ${item.size} × ${item.quantity} — ${item.product.price}`,
       `  ${item.product.image}`,
     ].join("\n")).join("\n");
+    let orderId = "";
+    let saveError = "";
+    const orderRequest = new AbortController();
+    const orderTimeout = window.setTimeout(() => orderRequest.abort(), 12000);
+    try {
+      const order = await createOrder(items.map((item) => ({
+        slug: item.product.slug,
+        name: item.product.name,
+        quantity: item.quantity,
+        size: item.size,
+        price: item.product.price,
+        image: item.product.image,
+      })), total, checkout, orderRequest.signal);
+      orderId = order.id;
+    } catch (error) {
+      saveError = error instanceof Error ? error.message : "Unable to save order";
+    } finally {
+      window.clearTimeout(orderTimeout);
+    }
+
     const message = [
       "Hello SHABA, I would like to place this order:",
+      orderId ? `Order reference: ${orderId}` : "Order reference: WhatsApp checkout",
       "",
       productLines,
       "",
@@ -594,16 +619,25 @@ export function CartPage() {
       checkout.area ? `Delivery area: ${checkout.area}` : "",
       checkout.note ? `Note: ${checkout.note}` : "",
     ].filter(Boolean).join("\n");
+    const whatsappUrl = `https://wa.me/250795979106?text=${encodeURIComponent(message)}`;
+
     try {
-      await createOrder(items.map((item) => ({ slug: item.product.slug, name: item.product.name, quantity: item.quantity, size: item.size })), total);
-      if (whatsappWindow) whatsappWindow.location.href = `https://wa.me/250795979106?text=${encodeURIComponent(message)}`;
-      else window.location.href = `https://wa.me/250795979106?text=${encodeURIComponent(message)}`;
-      clearCart();
-      setItems([]);
+      if (whatsappWindow) {
+        whatsappWindow.location.href = whatsappUrl;
+      } else {
+        window.location.href = whatsappUrl;
+      }
+      if (orderId) {
+        clearCart();
+        setItems([]);
+        setSavedOrderId(orderId);
+      } else {
+        setOrderSaveWarning(`We opened WhatsApp, but could not save this order to the dashboard (${saveError}). Please send the WhatsApp message to complete your request.`);
+      }
       setSubmitted(true);
     } catch {
       whatsappWindow?.close();
-      setCheckoutError("We could not save your order. Please try again before continuing to WhatsApp.");
+      setCheckoutError("We couldn't open WhatsApp. Please check that WhatsApp is available and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -613,9 +647,11 @@ export function CartPage() {
     return (
       <main className="flex min-h-[65vh] items-center justify-center px-5 py-20 text-center">
         <div className="max-w-xl">
-          <span className="eyebrow text-gold">Order received</span>
-          <h1 className="mt-5 font-serif text-5xl">Thank you.</h1>
-          <p className="mt-6 text-sm leading-7 text-forest/60">Your order is now in the SHABA studio queue. We will confirm the next steps with you directly.</p>
+          <span className="eyebrow text-gold">WhatsApp checkout</span>
+          <h1 className="mt-5 font-serif text-5xl">One last step.</h1>
+          <p className="mt-6 text-sm leading-7 text-forest/60">Your order details are ready in WhatsApp. Review the message and tap Send to place your order with SHABA.</p>
+          {savedOrderId && <p className="mt-4 text-xs text-forest/55">Order reference: {savedOrderId}</p>}
+          {orderSaveWarning && <p className="mt-5 border border-brass/30 bg-brass/10 p-4 text-left text-xs leading-6 text-brass">{orderSaveWarning}</p>}
           <Link className="underlined-link mt-8" to="/shop">Continue exploring <Arrow /></Link>
         </div>
       </main>
@@ -649,7 +685,7 @@ export function CartPage() {
           <form className="ml-auto mt-8 max-w-xl" onSubmit={submitOrder}>
             <div className="flex justify-between border-b border-forest/15 pb-5"><span>Total</span><strong>{total}</strong></div>
             <h2 className="mt-8 font-serif text-3xl">Checkout details</h2>
-            <p className="mt-2 text-xs leading-5 text-forest/50">These details are sent to WhatsApp and are not stored in Supabase.</p>
+            <p className="mt-2 text-xs leading-5 text-forest/50">Your name, phone, fulfillment, and order details are saved to the order dashboard and included in the WhatsApp message.</p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <CheckoutField label="Name" value={checkout.name} onChange={(name) => setCheckout({ ...checkout, name })} />
               <CheckoutField label="Phone" type="tel" value={checkout.phone} onChange={(phone) => setCheckout({ ...checkout, phone })} />

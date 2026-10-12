@@ -1,6 +1,6 @@
 import type { Product } from "../data";
 import { products as fallbackProducts } from "../data";
-import { apiBase, supabase } from "./supabase";
+import { apiBase, supabase, supabaseAnonKey } from "./supabase";
 import { fallbackJournals, type JournalEntry } from "../journals";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -9,13 +9,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {}),
+      Authorization: `Bearer ${data.session?.access_token ?? supabaseAnonKey}`,
       ...options.headers,
     },
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(body.error ?? "Request failed");
+    const body = await response.json().catch(() => null);
+    const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+    throw new Error(body?.error ?? body?.message ?? `Request failed (${status})`);
   }
   return response.json();
 }
@@ -76,25 +77,42 @@ export const adminApi = {
     form.append("file", file);
     const response = await fetch(`${apiBase}/admin/upload`, {
       method: "POST",
-      headers: data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {},
+      headers: {
+        Authorization: `Bearer ${data.session?.access_token ?? supabaseAnonKey}`,
+      },
       body: form,
     });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "Upload failed");
+    const body = await response.json().catch(() => ({ error: "Upload failed" }));
+    if (!response.ok) throw new Error(body.error ?? body.message ?? "Upload failed");
     return body as { url: string };
   },
 };
 
-export const createOrder = (items: Array<{ slug: string; name: string; quantity: number; size: string }>, total: string) =>
+export type OrderCustomer = {
+  name: string;
+  phone: string;
+  fulfillment: string;
+  area: string;
+  note: string;
+};
+
+export const createOrder = (
+  items: Array<{ slug: string; name: string; quantity: number; size: string; price: string; image: string }>,
+  total: string,
+  customer: OrderCustomer,
+  signal?: AbortSignal,
+) =>
   request<OrderRecord>("/orders", {
     method: "POST",
-    body: JSON.stringify({ items, total }),
+    signal,
+    body: JSON.stringify({ items, total, customer }),
   });
 
 export type OrderRecord = {
   id: string;
-  items: Array<{ name: string; quantity: number; size?: string }>;
+  items: Array<{ slug?: string; name: string; quantity: number; size?: string; price?: string; image?: string }>;
   total: string;
   status: string;
   createdAt: string;
+  customer?: OrderCustomer;
 };
