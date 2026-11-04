@@ -70,11 +70,11 @@ export default function HomePage() {
         />
         <div className="absolute inset-0 -z-10 bg-gradient-to-r from-forest/75 via-forest/25 to-transparent" />
         <div className="mx-auto w-full max-w-[1440px] px-5 pb-14 pt-40 sm:px-8 sm:pb-20 lg:px-14 lg:pb-24">
-          <span className="home-minimal-kicker">SHABA <i /> MADE IN BURUNDI</span>
+          <span className="home-minimal-kicker">SHABA CRAFTS <i /> MADE IN BURUNDI</span>
           <h1 className="mt-6 max-w-3xl text-5xl font-medium leading-[0.94] tracking-[-0.06em] sm:text-7xl lg:text-8xl">
-            A sense of place.<br />A style of your own.
+            Discover Handmade Fashion, Made in Burundi.
           </h1>
-          <Link className="home-minimal-cta mt-8" to="/shop">Discover SHABA <Arrow /></Link>
+          <Link className="home-minimal-cta mt-8" to="/shop">Discover Shaba Crafts <Arrow /></Link>
         </div>
         <span className="absolute bottom-6 right-5 hidden text-[9px] uppercase tracking-[0.18em] text-sand/75 sm:block lg:right-14">Bujumbura · 2026</span>
       </section>
@@ -97,10 +97,15 @@ export default function HomePage() {
       </section>
 
       <section className="home-minimal-intro px-5 py-12 sm:px-8 sm:py-16 lg:px-14 lg:py-20">
-        <div className="mx-auto grid max-w-[1440px] gap-5 sm:grid-cols-[1fr_1.2fr] sm:items-end sm:gap-10">
-          <span className="home-minimal-label">Rooted in Burundi</span>
-          <p className="max-w-2xl text-xl leading-snug tracking-[-0.035em] text-forest sm:text-2xl">
-            Clothing and everyday pieces, made with care in the place we call home.
+        <div className="mx-auto grid max-w-[1440px] gap-5 sm:grid-cols-[0.7fr_1.3fr] sm:items-end sm:gap-10">
+          <div className="flex flex-col gap-4">
+            <span className="home-minimal-label">Rooted in Burundi</span>
+            <Link className="inline-flex w-fit items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-forest transition hover:text-olive" to="/story">
+              Our story <Arrow />
+            </Link>
+          </div>
+          <p className="max-w-3xl text-xl leading-snug tracking-[-0.035em] text-forest/80 sm:text-2xl lg:text-[2rem]">
+            At Shaba Crafts, we celebrate the creativity and craftsmanship of Burundi through handmade clothing, sandals, bags and accessories. Discover unique pieces made locally with attention to detail and a passion for handmade design.
           </p>
         </div>
       </section>
@@ -211,40 +216,33 @@ export default function HomePage() {
                   <span aria-hidden="true" className="home-feature-arrow grid size-9 shrink-0 place-items-center rounded-full border border-sand/70"><Arrow /></span>
                 </span>
               </Link>
-              <Link className="home-feature-note flex min-h-[150px] items-end justify-between gap-4 p-5 sm:min-h-0 sm:p-7" to="/story">
+              <Link className="home-feature-note flex min-h-[150px] flex-col items-start justify-between gap-4 p-5 sm:min-h-0 sm:p-7" to="/story">
                 <span><span className="home-minimal-label">Bujumbura, Burundi</span><span className="mt-2 block max-w-xs text-xl font-medium leading-tight tracking-[-0.04em] sm:text-2xl">A local point of view, made to travel.</span></span>
-                <span aria-hidden="true" className="home-feature-arrow grid size-9 shrink-0 place-items-center rounded-full border border-forest/30"><Arrow /></span>
+                <span className="home-minimal-cta inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-forest">
+                  Our story <Arrow />
+                </span>
               </Link>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="home-minimal-campaign grid bg-olive text-sand md:grid-cols-2">
-        <img
-          alt="SHABA clothing and accessories, made in Burundi"
-          className="min-h-[320px] size-full object-cover sm:min-h-[440px]"
-          src={campaignImage}
-        />
-        <div className="flex items-center px-6 py-12 sm:px-10 sm:py-16 lg:px-16">
-          <div className="max-w-md">
-            <span className="home-minimal-label text-gold">Made in Burundi</span>
-            <h2 className="mt-4 text-4xl font-medium leading-[1.02] tracking-[-0.05em] sm:text-6xl">Made for your everyday.</h2>
-            <Link className="home-minimal-cta mt-7" to="/story">Our story <Arrow /></Link>
+      <section aria-label="SHABA newsletter" className="home-newsletter-banner px-5 py-12 sm:px-8 sm:py-16 lg:px-14">
+        <div className="mx-auto max-w-[1440px]">
+          <div className="relative mx-auto max-w-[880px] overflow-hidden rounded-[1.75rem] border border-forest/10 bg-[#f9f5f0]/95 p-5 shadow-[0_18px_50px_rgba(23,37,30,0.08)] backdrop-blur-sm sm:p-7">
+            <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div>
+                <span className="home-minimal-label text-forest/65">A note from SHABA</span>
+                <h2 className="mt-3 max-w-xl text-2xl font-medium leading-tight tracking-[-0.05em] text-forest sm:text-4xl">Good things, now and then.</h2>
+              </div>
+              <div className="flex w-full max-w-[430px] items-stretch">
+                <form className="flex w-full items-center gap-2 rounded-full border border-forest/10 bg-white/90 px-2 py-2 shadow-[0_6px_16px_rgba(23,37,30,0.04)]" onSubmit={(event) => { event.preventDefault(); setNewsletterSubmitted(true); }}>
+                  <input aria-label="Email address" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-forest outline-none placeholder:text-forest/45" placeholder="Your email address" required type="email" />
+                  <button aria-label="Subscribe to SHABA updates" className="min-w-[150px] rounded-full border border-[#b68c52]/40 bg-[#b68c52] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-white transition duration-200 hover:bg-[#a57d46]" type="submit">{newsletterSubmitted ? "Thank you" : "Join us"}</button>
+                </form>
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
-
-      <section aria-label="SHABA newsletter" className="home-newsletter-banner px-5 py-12 text-sand sm:px-8 sm:py-16 lg:px-14">
-        <div className="mx-auto grid max-w-[1440px] gap-7 md:grid-cols-[1fr_0.8fr] md:items-end">
-          <div>
-            <span className="home-minimal-label text-sand/65">A note from SHABA</span>
-            <h2 className="mt-3 max-w-xl text-3xl font-medium leading-tight tracking-[-0.05em] text-sand sm:text-5xl">Good things, now and then.</h2>
-          </div>
-          <form className="home-newsletter-form flex w-full" onSubmit={(event) => { event.preventDefault(); setNewsletterSubmitted(true); }}>
-            <input aria-label="Email address" className="min-w-0 flex-1 bg-transparent py-4 text-sm text-sand outline-none placeholder:text-sand/55" placeholder="Your email address" required type="email" />
-            <button aria-label="Subscribe to SHABA updates" className="px-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-sand" type="submit">{newsletterSubmitted ? "Thank you" : "Join us"}</button>
-          </form>
         </div>
       </section>
     </main>

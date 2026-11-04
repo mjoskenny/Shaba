@@ -43,7 +43,11 @@ const NavIcon = ({ name }: { name: "bag" | "menu" | "close" }) => {
 
 const Wordmark = () => (
   <Link aria-label="SHABA home" className="brand-mark text-sand" to="/">
-    <span aria-hidden="true" className="brand-logo-art" />
+    <img
+      alt="SHABA home"
+      className="brand-logo-art"
+      src="/shaba-wordmark-mask-trans.png"
+    />
   </Link>
 );
 
@@ -530,7 +534,7 @@ export function StoryPage() {
 export function ContactPage() {
   return (
     <main>
-      <PageIntro eyebrow="Contact" title="Let’s continue the conversation." copy="Questions about a product, an order, care, or a possible collaboration? Reach the SHABA team in Bujumbura." />
+      <PageIntro eyebrow="Contact" title="Let’s continue the conversation." copy="Questions about handmade fashion from Burundi, an order, care, or a possible collaboration? Reach the Shaba Crafts team in Bujumbura." />
       <section className="px-5 py-20 sm:px-8 lg:px-14 lg:py-28">
         <div className="mx-auto grid max-w-[1200px] gap-16 lg:grid-cols-[0.8fr_1.2fr]">
           <div>

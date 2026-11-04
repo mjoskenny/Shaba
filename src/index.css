@@ -55,10 +55,9 @@
   .brand-logo-art {
     display: block;
     width: 11.75rem;
-    aspect-ratio: 283 / 58;
-    background: currentColor;
-    mask: url("/shaba-wordmark-mask-trans.png") center / contain no-repeat;
-    -webkit-mask: url("/shaba-wordmark-mask-trans.png") center / contain no-repeat;
+    height: auto;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
   }
 
   .nav-link {

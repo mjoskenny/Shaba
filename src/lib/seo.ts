@@ -13,38 +13,38 @@ export type SeoConfig = {
 
 const pageDefaults: Record<string, SeoConfig> = {
   "/": {
-    title: "SHABA | Crafted in Burundi",
-    description: "SHABA creates contemporary leather goods and everyday essentials in Burundi with thoughtful design, honest materials, and lasting craftsmanship.",
+    title: "Shaba Crafts | Handmade Clothing, Bags & Sandals in Burundi",
+    description: "Discover Shaba Crafts, a Burundian handmade fashion brand creating clothing, sandals, bags and accessories. Celebrate local craftsmanship and shop handmade products from Burundi.",
     path: "/",
     image: DEFAULT_IMAGE,
   },
   "/shop": {
-    title: "Shop SHABA | Leather Goods & Everyday Essentials",
-    description: "Browse SHABA’s handcrafted leather bags, wallets, and sandals made in Burundi for daily life and slow, intentional living.",
+    title: "Shop Handmade Products in Burundi | Shaba Crafts",
+    description: "Browse handcrafted clothing, sandals, bags and accessories made in Burundi by Shaba Crafts. Discover handmade fashion and local craftsmanship.",
     path: "/shop",
     image: DEFAULT_IMAGE,
   },
   "/story": {
-    title: "Our Story | SHABA",
-    description: "Learn how SHABA brings Burundian craft, material care, and contemporary design together in a slow, meaningful collection.",
+    title: "Our Story | Shaba Crafts",
+    description: "Learn how Shaba Crafts celebrates Burundian craftsmanship through handmade fashion, local creativity, and contemporary design made in Burundi.",
     path: "/story",
     image: DEFAULT_IMAGE,
   },
   "/contact": {
-    title: "Contact SHABA | Questions, Orders & Collaborations",
-    description: "Get in touch with SHABA for product questions, custom orders, and collaborations. We’re based in Bujumbura, Burundi.",
+    title: "Contact Shaba Crafts | Handmade Fashion in Burundi",
+    description: "Contact Shaba Crafts for handmade fashion, custom orders, product questions, and collaborations rooted in Burundian craftsmanship.",
     path: "/contact",
     image: DEFAULT_IMAGE,
   },
   "/refund-policy": {
-    title: "Returns & Exchange Policy | SHABA",
-    description: "Read SHABA’s customer care, return, and exchange policy for orders from our Burundian-made collection.",
+    title: "Returns & Exchange Policy | Shaba Crafts",
+    description: "Read Shaba Crafts’ customer care and policy for handmade products made in Burundi, with support for exchanges and returns.",
     path: "/refund-policy",
     image: DEFAULT_IMAGE,
   },
   "/cart": {
-    title: "Your Bag | SHABA",
-    description: "Review your SHABA order before checkout and keep track of the pieces you’ve chosen for your everyday essentials.",
+    title: "Your Bag | Shaba Crafts",
+    description: "Review your handmade products from Burundi before checkout and continue your order with Shaba Crafts.",
     path: "/cart",
     image: DEFAULT_IMAGE,
   },
@@ -60,8 +60,8 @@ export function getSeoConfigFromPath(pathname: string): SeoConfig {
     const product = products.find((item) => item.slug === productMatch[1]);
     if (product) {
       return {
-        title: `${product.name} | SHABA`,
-        description: product.description,
+        title: `${product.name} | Shaba Crafts`,
+        description: `${product.description} Handmade in Burundi and designed for everyday wear and craftsmanship.`,
         path: normalizedPath,
         image: product.image,
       };
@@ -69,8 +69,8 @@ export function getSeoConfigFromPath(pathname: string): SeoConfig {
   }
 
   return {
-    title: "SHABA | Crafted in Burundi",
-    description: "SHABA creates contemporary leather goods and everyday essentials in Burundi with thoughtful design, honest materials, and lasting craftsmanship.",
+    title: "Shaba Crafts | Handmade Clothing, Bags & Sandals in Burundi",
+    description: "Discover Shaba Crafts, a Burundian handmade fashion brand creating clothing, sandals, bags and accessories. Celebrate local craftsmanship and shop handmade products from Burundi.",
     path: normalizedPath,
     image: DEFAULT_IMAGE,
   };
@@ -136,7 +136,7 @@ export function buildOrganizationSchema() {
       addressCountry: "BI",
     },
     description:
-      "SHABA creates contemporary leather goods and everyday essentials in Burundi with thoughtful design, honest materials, and lasting craftsmanship.",
+      "Shaba Crafts creates handmade fashion, bags, sandals and accessories in Burundi with local craftsmanship, attention to detail, and contemporary design.",
     sameAs: [SHABA_BRAND.website],
   };
 }

@@ -3,6 +3,7 @@ import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 import * as kv from "./kv_store.tsx";
+import { isAdminUser, normalizeAdminEmails } from "./admin_auth.js";
 const app = new Hono();
 const prefix = "/make-server-16e069d6";
 const allowedOrigins = (Deno.env.get("ALLOWED_ORIGINS") ?? "http://localhost:8443,http://localhost:8444").split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -222,16 +223,8 @@ async function requireAdmin(c: any) {
   if (error || !data.user) return null;
   if (!data.user.email_confirmed_at) return null;
 
-  const adminEmails = (Deno.env.get("ADMIN_EMAILS") ?? "")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  if (adminEmails.length && !adminEmails.includes((data.user.email ?? "").toLowerCase())) {
-    return null;
-  }
-
-  const appMetadata = data.user.app_metadata ?? {};
-  return appMetadata.role === "admin" || appMetadata.is_admin === true ? data.user : null;
+  const adminEmails = normalizeAdminEmails(Deno.env.get("ADMIN_EMAILS") ?? "");
+  return isAdminUser(data.user, adminEmails) ? data.user : null;
 }
 
 app.get(`${prefix}/products`, async (c) => {
