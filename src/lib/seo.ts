@@ -2,7 +2,7 @@ import { SHABA_BRAND } from "./brand";
 import { products } from "../data";
 
 const BASE_URL = "https://www.shabacrafts.store";
-const DEFAULT_IMAGE = `${BASE_URL}/shaba-wordmark-mask-trans.png`;
+const DEFAULT_IMAGE = `${BASE_URL}/shaba-wordmark-mask.png`;
 
 export type SeoConfig = {
   title: string;
@@ -126,8 +126,8 @@ export function buildOrganizationSchema() {
     "@type": "ClothingStore",
     name: SHABA_BRAND.name,
     url: SHABA_BRAND.website,
-    logo: `${SHABA_BRAND.website}/shaba-wordmark-mask-trans.png`,
-    image: `${SHABA_BRAND.website}/shaba-wordmark-mask-trans.png`,
+    logo: `${SHABA_BRAND.website}/shaba-wordmark-mask.png`,
+    image: `${SHABA_BRAND.website}/shaba-wordmark-mask.png`,
     telephone: SHABA_BRAND.contactNumber,
     email: SHABA_BRAND.email,
     address: {

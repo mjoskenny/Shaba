@@ -148,3 +148,4 @@
 # Keep the production storefront wordmark directly in Git so deploy providers
 # receive the real image instead of a Git LFS pointer.
 public/shaba-wordmark-mask.png -filter -diff -merge -text
+public/shaba-wordmark-mask-trans.png -filter -diff -merge -text

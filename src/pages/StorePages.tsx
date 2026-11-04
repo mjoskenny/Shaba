@@ -46,7 +46,7 @@ const Wordmark = () => (
     <img
       alt="SHABA home"
       className="brand-logo-art"
-      src="/shaba-wordmark-mask-trans.png"
+      src="/shaba-wordmark-mask.png"
     />
   </Link>
 );
