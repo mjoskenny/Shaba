@@ -4,16 +4,77 @@ import { logger } from "npm:hono/logger";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 import * as kv from "./kv_store.tsx";
 const app = new Hono();
+const prefix = "/make-server-16e069d6";
+const allowedOrigins = (Deno.env.get("ALLOWED_ORIGINS") ?? "http://localhost:8443,http://localhost:8444").split(",").map((origin) => origin.trim()).filter(Boolean);
+const rateLimitWindowMs = 60_000;
+const rateLimitMaxRequests = 60;
+const clientRequestTimestamps = new Map<string, number[]>();
+
+function cleanOrigin(origin: string | undefined) {
+  if (!origin) return "";
+  try {
+    return new URL(origin).origin;
+  } catch {
+    return "";
+  }
+}
+
+function isAllowedOrigin(origin: string | undefined) {
+  const cleaned = cleanOrigin(origin);
+  if (!cleaned) return false;
+  return allowedOrigins.includes(cleaned) || allowedOrigins.some((allowed) => allowed.endsWith("*") && cleaned.startsWith(allowed.slice(0, -1)));
+}
+
+function getClientIp(c: any) {
+  const forwarded = c.req.header("x-forwarded-for") ?? c.req.header("cf-connecting-ip") ?? c.req.header("x-real-ip") ?? "";
+  const primary = forwarded.split(",")[0]?.trim();
+  return primary || "unknown";
+}
+
+function applyRateLimit(c: any) {
+  const ip = getClientIp(c);
+  const now = Date.now();
+  const windowValues = clientRequestTimestamps.get(ip) ?? [];
+  const recent = windowValues.filter((timestamp) => now - timestamp < rateLimitWindowMs);
+  if (recent.length >= rateLimitMaxRequests) {
+    clientRequestTimestamps.set(ip, recent);
+    return false;
+  }
+  recent.push(now);
+  clientRequestTimestamps.set(ip, recent);
+  return true;
+}
 
 // Enable logger
 app.use('*', logger(console.log));
 
-// Enable CORS for all routes and methods
+app.use('*', async (c, next) => {
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("X-Frame-Options", "DENY");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+  c.header("Cross-Origin-Opener-Policy", "same-origin");
+  c.header("Cross-Origin-Resource-Policy", "same-origin");
+  c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+
+  const pathname = new URL(c.req.url).pathname;
+  const routeIsRateLimited = pathname.includes("/analytics/events") || pathname.includes("/orders") || pathname.includes("/admin/upload") || pathname.includes("/admin/login");
+  if (routeIsRateLimited && !applyRateLimit(c)) {
+    return c.json({ error: "Too many requests. Please try again in a minute." }, 429);
+  }
+
+  await next();
+});
+
+// Enable CORS for browser requests from trusted origins only
 app.use(
   "/*",
   cors({
-    origin: "*",
-    allowHeaders: ["Content-Type", "Authorization"],
+    origin: (origin) => {
+      if (!origin) return "null";
+      return isAllowedOrigin(origin) ? origin : "null";
+    },
+    allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
@@ -21,11 +82,9 @@ app.use(
 );
 
 // Health check endpoint
-app.get("/make-server-16e069d6/health", (c) => {
+app.get(`${prefix}/health`, (c) => {
   return c.json({ status: "ok" });
 });
-
-const prefix = "/make-server-16e069d6";
 
 const starterProducts = [
   {
@@ -107,6 +166,15 @@ const starterJournals = [
   },
 ];
 
+function normalizedSizes(value: unknown): string[] {
+  const entries = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const sizes = entries
+    .filter((size): size is string => typeof size === "string")
+    .flatMap((size) => size.split(",").map((part) => part.trim()).filter(Boolean))
+    .flatMap((size) => /^\d+(?:\s+\d+)+$/.test(size) ? size.split(/\s+/) : [size]);
+  return sizes.length ? [...new Set(sizes)] : ["One size"];
+}
+
 async function ensureCatalog() {
   const existing = await kv.getByPrefix("product:");
   if (existing.length) return existing;
@@ -115,6 +183,19 @@ async function ensureCatalog() {
     starterProducts,
   );
   return starterProducts;
+}
+
+async function ensureCategories() {
+  const existing = await kv.getByPrefix("category:");
+  if (existing.length) return existing;
+  const catalog = await ensureCatalog();
+  const names = [...new Set(catalog.map((product) => product.category).filter(Boolean))];
+  const categories = names.map((name) => ({
+    slug: name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+    name,
+  }));
+  await kv.mset(categories.map(({ slug }) => `category:${slug}`), categories);
+  return categories;
 }
 
 async function ensureJournals() {
@@ -131,12 +212,24 @@ async function requireAdmin(c: any) {
   const authorization = c.req.header("Authorization") ?? "";
   const token = authorization.replace(/^Bearer\s+/i, "");
   if (!token) return null;
-  const client = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-  );
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!supabaseUrl || !anonKey) return null;
+
+  const client = createClient(supabaseUrl, anonKey);
   const { data, error } = await client.auth.getUser(token);
   if (error || !data.user) return null;
+  if (!data.user.email_confirmed_at) return null;
+
+  const adminEmails = (Deno.env.get("ADMIN_EMAILS") ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.length && !adminEmails.includes((data.user.email ?? "").toLowerCase())) {
+    return null;
+  }
+
   const appMetadata = data.user.app_metadata ?? {};
   return appMetadata.role === "admin" || appMetadata.is_admin === true ? data.user : null;
 }
@@ -176,12 +269,42 @@ app.get(`${prefix}/journals/:slug`, async (c) => {
   return journal ? c.json(journal) : c.json({ error: "Journal not found" }, 404);
 });
 
-app.post(`${prefix}/orders`, async (c) => {
+app.post(`${prefix}/analytics/events`, async (c) => {
   try {
     const input = await c.req.json();
+    const allowedEvents = ["page_view", "click", "product_view", "add_to_cart", "checkout_start"];
+    const visitorId = typeof input.visitorId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.visitorId)
+      ? input.visitorId
+      : null;
+    const path = typeof input.path === "string" ? input.path.split(/[?#]/, 1)[0].slice(0, 200) : "";
+    if (!visitorId || !allowedEvents.includes(input.event) || !path.startsWith("/") || path.startsWith("/admin")) {
+      return c.json({ error: "Invalid analytics event" }, 400);
+    }
+
+    const database = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { error } = await database.from("store_analytics_events").insert({
+      visitor_id: visitorId,
+      event_type: input.event,
+      path,
+      target: typeof input.target === "string" ? input.target.replace(/[\r\n]/g, " ").slice(0, 160) : null,
+      product_slug: typeof input.productSlug === "string" ? input.productSlug.slice(0, 120) : null,
+    });
+    if (error) throw error;
+    return c.json({ recorded: true }, 201);
+  } catch (error) {
+    console.log("Analytics event error", error);
+    return c.json({ error: "Unable to record analytics" }, 500);
+  }
+});
+
+app.post(`${prefix}/orders`, async (c) => {
+  let stage = "read request";
+  try {
+    const input = await c.req.json();
+    stage = "validate order";
     if (!Array.isArray(input.items) || !input.items.length || input.items.some((item: any) =>
       !item || typeof item.slug !== "string" || typeof item.name !== "string" ||
-      !Number.isInteger(item.quantity) || item.quantity < 1 || typeof item.size !== "string"
+      !Number.isSafeInteger(item.quantity) || item.quantity < 1 || typeof item.size !== "string"
     )) {
       return c.json({ error: "An order requires valid items" }, 400);
     }
@@ -191,17 +314,62 @@ app.post(`${prefix}/orders`, async (c) => {
       typeof customer.fulfillment !== "string"
     ) return c.json({ error: "Name, phone, and fulfillment are required" }, 400);
 
+    const name = customer.name.trim();
+    const phone = customer.phone.trim();
+    const fulfillment = customer.fulfillment.trim();
+    if (!/^[A-Za-zÀ-ÖØ-öø-ÿ' .-]{2,80}$/.test(name)) {
+      return c.json({ error: "Name format is invalid" }, 400);
+    }
+    if (!/^\+?[0-9\s()\-]{8,20}$/.test(phone)) {
+      return c.json({ error: "Phone number format is invalid" }, 400);
+    }
+    if (!/^(pickup|delivery)$/i.test(fulfillment)) {
+      return c.json({ error: "Fulfillment method is invalid" }, 400);
+    }
+
+    const items = [];
+    let totalValue = 0;
+    for (const item of input.items) {
+      stage = "load product";
+      const product = await kv.get(`product:${item.slug}`);
+      if (!product || product.published === false) {
+        return c.json({ error: `Product ${item.slug} is no longer available` }, 400);
+      }
+      const unitPrice = Number(String(product.price).replace(/[^\d]/g, ""));
+      if (!Number.isSafeInteger(unitPrice) || unitPrice <= 0) {
+        return c.json({ error: `Product ${item.slug} has an invalid price` }, 400);
+      }
+      const availableSizes = normalizedSizes(product.sizes);
+      if (!availableSizes.includes(item.size)) {
+        return c.json({ error: `Size ${item.size} is not available for ${product.name}` }, 400);
+      }
+      const lineTotal = unitPrice * item.quantity;
+      if (!Number.isSafeInteger(lineTotal) || !Number.isSafeInteger(totalValue + lineTotal)) {
+        return c.json({ error: "Order total is outside the supported range" }, 400);
+      }
+      totalValue += lineTotal;
+      items.push({
+        slug: product.slug,
+        name: product.name,
+        quantity: item.quantity,
+        size: item.size,
+        price: product.price,
+        image: product.image,
+      });
+    }
+
     const id = crypto.randomUUID();
+    stage = "save order";
     const order = {
       id,
-      items: input.items,
-      total: input.total ?? "",
+      items,
+      total: `${new Intl.NumberFormat("en-US").format(totalValue)} BIF`,
       customer: {
-        name: customer.name.trim(),
-        phone: customer.phone.trim(),
-        fulfillment: customer.fulfillment,
-        area: typeof customer.area === "string" ? customer.area.trim() : "",
-        note: typeof customer.note === "string" ? customer.note.trim() : "",
+        name,
+        phone,
+        fulfillment: fulfillment.toLowerCase() === "pickup" ? "Pickup" : "Delivery",
+        area: typeof customer.area === "string" ? customer.area.trim().slice(0, 120) : "",
+        note: typeof customer.note === "string" ? customer.note.trim().slice(0, 500) : "",
       },
       status: "new",
       createdAt: new Date().toISOString(),
@@ -209,7 +377,7 @@ app.post(`${prefix}/orders`, async (c) => {
     await kv.set(`order:${id}`, order);
     return c.json(order, 201);
   } catch (error) {
-    console.log("Order create error", error);
+    console.log("Order create error at", stage, error);
     return c.json({ error: "Unable to create order" }, 500);
   }
 });
@@ -219,12 +387,137 @@ app.get(`${prefix}/admin/products`, async (c) => {
   return c.json(await ensureCatalog());
 });
 
+app.get(`${prefix}/admin/categories`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  try {
+    return c.json(await ensureCategories());
+  } catch (error) {
+    console.log("Category load error", error);
+    return c.json({ error: "Unable to load categories" }, 500);
+  }
+});
+
+app.get(`${prefix}/admin/insights`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  try {
+    const requestedDays = Number(c.req.query("days") ?? 30);
+    const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 30;
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    start.setUTCDate(start.getUTCDate() - days + 1);
+
+    const database = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const [{ data: events, error: eventError }, storedOrders] = await Promise.all([
+      database.from("store_analytics_events")
+        .select("visitor_id,event_type,path,product_slug,created_at")
+        .gte("created_at", start.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(20000),
+      kv.getByPrefix("order:"),
+    ]);
+    if (eventError) throw eventError;
+
+    const includedOrders = storedOrders
+      .filter((order) => order.createdAt && new Date(order.createdAt) >= start && order.status !== "cancelled")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const pageEvents = (events ?? []).filter((event) => event.event_type === "page_view");
+    const uniqueVisitors = new Set(pageEvents.map((event) => event.visitor_id)).size;
+    const pageCounts = new Map<string, number>();
+    const productViews = new Map<string, number>();
+    const productAdds = new Map<string, number>();
+    for (const event of events ?? []) {
+      if (event.event_type === "page_view") pageCounts.set(event.path, (pageCounts.get(event.path) ?? 0) + 1);
+      if (event.product_slug && event.event_type === "product_view") {
+        productViews.set(event.product_slug, (productViews.get(event.product_slug) ?? 0) + 1);
+      }
+      if (event.product_slug && event.event_type === "add_to_cart") {
+        productAdds.set(event.product_slug, (productAdds.get(event.product_slug) ?? 0) + 1);
+      }
+    }
+
+    const daily = Array.from({ length: days }, (_, index) => {
+      const date = new Date(start);
+      date.setUTCDate(start.getUTCDate() + index);
+      const key = date.toISOString().slice(0, 10);
+      return { date: key, visits: 0, orders: 0 };
+    });
+    const dailyByDate = new Map(daily.map((day) => [day.date, day]));
+    for (const event of pageEvents) {
+      const day = dailyByDate.get(String(event.created_at).slice(0, 10));
+      if (day) day.visits += 1;
+    }
+    for (const order of includedOrders) {
+      const day = dailyByDate.get(String(order.createdAt).slice(0, 10));
+      if (day) day.orders += 1;
+    }
+
+    const orderValue = includedOrders.reduce((sum, order) => sum + Number(String(order.total).replace(/[^\d]/g, "")), 0);
+    const visits = pageEvents.length;
+    return c.json({
+      periodDays: days,
+      visits,
+      uniqueVisitors,
+      clicks: (events ?? []).filter((event) => event.event_type === "click").length,
+      productViews: (events ?? []).filter((event) => event.event_type === "product_view").length,
+      addToCart: (events ?? []).filter((event) => event.event_type === "add_to_cart").length,
+      checkoutStarts: (events ?? []).filter((event) => event.event_type === "checkout_start").length,
+      orders: includedOrders.length,
+      orderValue,
+      averageOrderValue: includedOrders.length ? Math.round(orderValue / includedOrders.length) : 0,
+      conversionRate: visits ? (includedOrders.length / visits) * 100 : 0,
+      daily,
+      topPages: [...pageCounts].map(([path, views]) => ({ path, views })).sort((a, b) => b.views - a.views).slice(0, 6),
+      topProducts: [...new Set([...productViews.keys(), ...productAdds.keys()])]
+        .map((slug) => ({ slug, views: productViews.get(slug) ?? 0, adds: productAdds.get(slug) ?? 0 }))
+        .sort((a, b) => b.views + b.adds - a.views - a.adds).slice(0, 6),
+      recentOrders: includedOrders.slice(0, 8),
+    });
+  } catch (error) {
+    console.log("Admin insights error", error);
+    return c.json({ error: "Unable to load store insights" }, 500);
+  }
+});
+
+app.post(`${prefix}/admin/categories`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  const input = await c.req.json();
+  const name = typeof input.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (!name || !slug) return c.json({ error: "A valid category name is required" }, 400);
+  const categories = await ensureCategories();
+  if (categories.some((category) => category.slug === slug || category.name.toLowerCase() === name.toLowerCase())) {
+    return c.json({ error: "That category already exists" }, 409);
+  }
+  const category = { slug, name };
+  await kv.set(`category:${slug}`, category);
+  return c.json(category, 201);
+});
+
+app.delete(`${prefix}/admin/categories/:slug`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  const slug = c.req.param("slug");
+  const category = await kv.get(`category:${slug}`);
+  if (!category) return c.json({ error: "Category not found" }, 404);
+  const products = await kv.getByPrefix("product:");
+  if (products.some((product) => product.category === category.name)) {
+    return c.json({ error: "Move or delete products in this category before removing it" }, 409);
+  }
+  await kv.del(`category:${slug}`);
+  return c.json({ success: true });
+});
+
 app.post(`${prefix}/admin/products`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
   const product = await c.req.json();
-  if (!product.slug || !product.name || !product.price) {
-    return c.json({ error: "Slug, name, and price are required" }, 400);
+  if (typeof product.slug !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(product.slug) ||
+    typeof product.name !== "string" || !product.name.trim() ||
+    typeof product.category !== "string" || !product.category.trim() ||
+    typeof product.price !== "string" || !product.price.trim()
+  ) {
+    return c.json({ error: "A valid slug, name, category, and price are required" }, 400);
   }
+  if (await kv.get(`product:${product.slug}`)) return c.json({ error: "A product with this slug already exists" }, 409);
+  product.sizes = normalizedSizes(product.sizes);
   await kv.set(`product:${product.slug}`, product);
   return c.json(product, 201);
 });
@@ -233,17 +526,29 @@ app.put(`${prefix}/admin/products/:slug`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
   const product = await c.req.json();
   const oldSlug = c.req.param("slug");
-  if (!product.slug || !product.name || !product.price) {
-    return c.json({ error: "Slug, name, and price are required" }, 400);
+  if (typeof product.slug !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(product.slug) ||
+    typeof product.name !== "string" || !product.name.trim() ||
+    typeof product.category !== "string" || !product.category.trim() ||
+    typeof product.price !== "string" || !product.price.trim()
+  ) {
+    return c.json({ error: "A valid slug, name, category, and price are required" }, 400);
   }
-  if (oldSlug !== product.slug) await kv.del(`product:${oldSlug}`);
+  const existing = await kv.get(`product:${oldSlug}`);
+  if (!existing) return c.json({ error: "Product not found" }, 404);
+  if (oldSlug !== product.slug && await kv.get(`product:${product.slug}`)) {
+    return c.json({ error: "A product with this slug already exists" }, 409);
+  }
+  product.sizes = normalizedSizes(product.sizes);
   await kv.set(`product:${product.slug}`, product);
+  if (oldSlug !== product.slug) await kv.del(`product:${oldSlug}`);
   return c.json(product);
 });
 
 app.delete(`${prefix}/admin/products/:slug`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
-  await kv.del(`product:${c.req.param("slug")}`);
+  const key = `product:${c.req.param("slug")}`;
+  if (!await kv.get(key)) return c.json({ error: "Product not found" }, 404);
+  await kv.del(key);
   return c.json({ success: true });
 });
 
@@ -257,6 +562,10 @@ app.put(`${prefix}/admin/orders/:id`, async (c) => {
   const existing = await kv.get(`order:${c.req.param("id")}`);
   if (!existing) return c.json({ error: "Order not found" }, 404);
   const update = await c.req.json();
+  const allowedStatuses = ["new", "confirmed", "making", "ready", "completed", "cancelled"];
+  if (typeof update.status !== "string" || !allowedStatuses.includes(update.status)) {
+    return c.json({ error: "A valid order status is required" }, 400);
+  }
   const order = { ...existing, status: update.status ?? existing.status };
   await kv.set(`order:${order.id}`, order);
   return c.json(order);
@@ -319,5 +628,7 @@ app.post(`${prefix}/admin/upload`, async (c) => {
     return c.json({ error: "Unable to upload image" }, 500);
   }
 });
+
+app.notFound((c) => c.json({ error: "Not found" }, 404));
 
 Deno.serve(app.fetch);

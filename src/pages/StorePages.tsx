@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Link, Outlet, useLocation, useParams } from "react-router";
+import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import ProductCard from "../components/ProductCard";
 import AnnouncementBar from "../components/AnnouncementBar";
-import { craftImages, normalizeProductSizes, products as fallbackProducts, type Product } from "../data";
+import { normalizeProductSizes, products as fallbackProducts, type Product } from "../data";
 import { useProducts } from "../hooks/useProducts";
-import { createOrder, getJournal, getJournals, getProduct } from "../lib/api";
+import { createOrder, getProduct } from "../lib/api";
 import { addCartItem, clearCart, getCart, getCartCount, removeCartItem, updateCartItem, type CartItem } from "../lib/cart";
-import { fallbackJournals, type JournalEntry } from "../journals";
+import { SHABA_BRAND } from "../lib/brand";
+import { trackStoreEvent } from "../lib/analytics";
+import { getStoryContent } from "../lib/site-content";
+import { applySeo, buildOrganizationSchema, getSeoConfigFromPath } from "../lib/seo";
 
 const Arrow = ({ diagonal = false }: { diagonal?: boolean }) => (
   <svg aria-hidden="true" className="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
@@ -46,13 +49,50 @@ const Wordmark = () => (
 
 export function SiteLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isHomePage = location.pathname === "/";
+  const isProductPage = location.pathname.startsWith("/products/");
   const [cartCount, setCartCount] = useState(getCartCount);
+  const [addedItem, setAddedItem] = useState<CartItem | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/admin")) return;
+    const seo = getSeoConfigFromPath(location.pathname);
+    applySeo(seo);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/admin")) return;
+    void trackStoreEvent("page_view", { path: location.pathname });
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (location.pathname.startsWith("/admin") || !(event.target instanceof Element)) return;
+      const control = event.target.closest("a, button");
+      if (!control || control.closest("[data-no-analytics]")) return;
+
+      const rawHref = control instanceof HTMLAnchorElement ? control.getAttribute("href") : null;
+      let href = "";
+      if (rawHref) {
+        try {
+          const targetUrl = new URL(rawHref, window.location.origin);
+          if (targetUrl.origin === window.location.origin) href = targetUrl.pathname.slice(0, 160);
+        } catch {
+          href = "";
+        }
+      }
+      const label = control.getAttribute("aria-label") || control.textContent?.trim().replace(/\s+/g, " ") || "control";
+      void trackStoreEvent("click", { target: href || label.slice(0, 120) });
+    };
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -63,10 +103,23 @@ export function SiteLayout() {
   }, [location.pathname]);
 
   useEffect(() => {
-    const updateCount = () => setCartCount(getCartCount());
+    const updateCount = (event: Event) => {
+      setCartCount(getCartCount());
+      const item = (event as CustomEvent<{ addedItem?: CartItem }>).detail?.addedItem;
+      if (item) setAddedItem(item);
+    };
     window.addEventListener("shaba-cart-change", updateCount);
     return () => window.removeEventListener("shaba-cart-change", updateCount);
   }, []);
+
+  useEffect(() => {
+    if (!addedItem) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddedItem(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [addedItem]);
 
   return (
     <div className="min-h-screen bg-sand text-forest">
@@ -83,7 +136,6 @@ export function SiteLayout() {
             <nav className="hidden items-center gap-8 text-[10px] font-semibold uppercase tracking-[0.16em] lg:flex">
               <Link className="nav-link" to="/shop">Shop</Link>
               <Link className="nav-link" to="/story">Our story</Link>
-              <Link className="nav-link" to="/craft">Craft</Link>
             </nav>
             <button aria-label={menuOpen ? "Close menu" : "Open menu"} className="icon-button lg:hidden" onClick={() => setMenuOpen(!menuOpen)}>
               <NavIcon name={menuOpen ? "close" : "menu"} />
@@ -92,7 +144,6 @@ export function SiteLayout() {
               <Wordmark />
             </div>
             <div className="ml-auto flex items-center gap-5 text-[10px] font-semibold uppercase tracking-[0.16em]">
-              <Link className="nav-link hidden sm:block" to="/journal">Journal</Link>
               <Link aria-label={`Bag with ${cartCount} items`} className="flex items-center gap-2 transition-colors hover:text-gold" to="/cart">
                 <NavIcon name="bag" />
                 <span className="hidden sm:inline">Bag</span>
@@ -102,29 +153,100 @@ export function SiteLayout() {
           </div>
           {menuOpen && (
             <nav className="absolute inset-x-0 top-20 flex flex-col gap-6 border-t border-sand/15 bg-forest px-6 py-8 font-serif text-3xl shadow-xl lg:hidden">
-              {[["Shop", "/shop"], ["Our story", "/story"], ["Craft", "/craft"], ["Journal", "/journal"], ["Contact", "/contact"]].map(([label, to]) => (
+                 {[["Shop", "/shop"], ["Our story", "/story"], ["Contact", "/contact"]].map(([label, to]) => (
                 <Link key={label} onClick={() => setMenuOpen(false)} to={to}>{label}</Link>
               ))}
             </nav>
           )}
         </header>
       </div>
+      {!isHomePage && !isProductPage && (
+        <div className="mx-auto max-w-[1440px] px-5 pt-5 sm:px-8 lg:px-14">
+          <button
+            className="inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-forest/55 transition-colors hover:text-brass"
+            onClick={() => {
+              if (window.history.state?.idx > 0) navigate(-1);
+              else navigate("/shop");
+            }}
+            type="button"
+          >
+            <svg aria-hidden="true" className="size-4 rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+              <path d="M5 12h14m-5-5 5 5-5 5" />
+            </svg>
+            Back
+          </button>
+        </div>
+      )}
       <Outlet />
-      <footer className="bg-olive px-5 py-14 text-sand sm:px-8 lg:px-14">
+      <script
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "WebSite",
+                name: SHABA_BRAND.name,
+                url: SHABA_BRAND.website,
+                description:
+                  "SHABA creates contemporary leather goods and everyday essentials in Burundi with thoughtful design, honest materials, and lasting craftsmanship.",
+                potentialAction: {
+                  "@type": "SearchAction",
+                  target: `${SHABA_BRAND.website}/shop?q={search_term_string}`,
+                  "query-input": "required name=search_term_string",
+                },
+              },
+              buildOrganizationSchema(),
+            ],
+          }),
+        }}
+        type="application/ld+json"
+      />
+      <footer className="site-footer bg-forest px-5 py-14 text-sand sm:px-8 lg:px-14">
         <div className="mx-auto grid max-w-[1440px] gap-12 border-b border-sand/15 pb-12 md:grid-cols-4">
           <div>
             <Wordmark />
             <p className="mt-5 max-w-xs text-xs leading-6 text-sand/60">Rooted in Burundi. Made for what’s next.</p>
           </div>
           <FooterColumn title="Explore" links={[["Shop all", "/shop"], ["Sandals", "/shop"], ["Bags", "/shop"]]} />
-          <FooterColumn title="About" links={[["Our story", "/story"], ["Our craft", "/craft"], ["Journal", "/journal"]]} />
-          <FooterColumn title="Support" links={[["Care guide", "/care"], ["Returns & exchanges", "/refund-policy"], ["Contact", "/contact"]]} />
+          <FooterColumn title="About" links={[["Our story", "/story"], ["Contact", "/contact"], ["Returns & exchanges", "/refund-policy"]]} />
         </div>
         <div className="mx-auto mt-6 flex max-w-[1440px] justify-between text-[9px] uppercase tracking-[0.18em] text-sand/45">
           <span>© 2025 SHABA</span>
-          <Link to="/refund-policy">Returns & exchanges</Link>
+          <div className="flex items-center gap-5">
+            <span className="hidden normal-case tracking-normal sm:inline">A random browser ID helps us understand store visits; contact details are not collected.</span>
+            <Link to="/refund-policy">Returns & exchanges</Link>
+          </div>
         </div>
       </footer>
+      {addedItem && (
+        <div className="cart-added-overlay" onClick={() => setAddedItem(null)}>
+          <section
+            aria-labelledby="cart-added-title"
+            aria-modal="true"
+            className="cart-added-panel"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="flex items-center justify-between border-b border-forest/12 pb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-olive">Added to your bag</p>
+              <button aria-label="Close bag confirmation" className="grid size-9 place-items-center text-2xl leading-none text-forest/60 transition-colors hover:text-forest" onClick={() => setAddedItem(null)} type="button">×</button>
+            </div>
+            <div className="flex gap-4 py-5">
+              <img alt="" className="size-24 shrink-0 object-cover" src={addedItem.product.image} />
+              <div className="min-w-0 pt-1">
+                <h2 className="text-lg font-medium leading-tight tracking-[-0.035em]" id="cart-added-title">{addedItem.product.name}</h2>
+                <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-forest/55">{addedItem.product.category} · Size {addedItem.size}</p>
+                <p className="mt-3 text-sm font-semibold">{addedItem.product.price}</p>
+              </div>
+            </div>
+            <p className="border-t border-forest/12 pt-4 text-xs text-forest/60">Your bag has {cartCount} {cartCount === 1 ? "piece" : "pieces"}.</p>
+            <Link className="mt-5 flex min-h-12 items-center justify-between bg-forest px-5 text-[10px] font-semibold uppercase tracking-[0.15em] text-sand transition-colors hover:bg-gold hover:text-forest" onClick={() => setAddedItem(null)} to="/cart">
+              View bag <Arrow />
+            </Link>
+            <button className="mt-4 w-full py-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-forest/65 transition-colors hover:text-forest" onClick={() => setAddedItem(null)} type="button">Continue shopping</button>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -142,11 +264,13 @@ function FooterColumn({ title, links }: { title: string; links: [string, string]
 
 function PageIntro({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
   return (
-    <section className="bg-forest px-5 py-20 text-sand sm:px-8 sm:py-24 lg:px-14">
-      <div className="mx-auto max-w-[1440px]">
-        <span className="eyebrow text-gold">{eyebrow}</span>
-        <h1 className="mt-5 max-w-4xl font-serif text-5xl leading-[1.02] sm:text-7xl">{title}</h1>
-        <p className="mt-7 max-w-2xl text-sm leading-7 text-sand/70 sm:text-base">{copy}</p>
+    <section className="shop-page-intro px-5 py-12 sm:px-8 sm:py-16 lg:px-14 lg:py-20">
+      <div className="mx-auto grid max-w-[1440px] gap-5 md:grid-cols-[1.15fr_0.85fr] md:items-end md:gap-12">
+        <div>
+          <span className="home-section-label"><i>SHABA</i> / {eyebrow}</span>
+          <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-[0.98] tracking-[-0.06em] sm:text-6xl lg:text-7xl">{title}</h1>
+        </div>
+        <p className="max-w-xl text-sm leading-7 text-forest/65 sm:text-base sm:leading-8">{copy}</p>
       </div>
     </section>
   );
@@ -177,32 +301,12 @@ export function ShopPage() {
 
   return (
     <main>
-      <PageIntro eyebrow="The collection" title="Objects made to travel through life." copy="Functional leather pieces designed in Bujumbura, cut with intention, and finished by skilled hands." />
-      <section className="px-5 pb-24 pt-10 sm:px-8 lg:px-14 lg:pb-32 lg:pt-14">
+      <section className="px-5 pb-24 pt-14 sm:px-8 lg:px-14 lg:pb-32 lg:pt-20">
         <div className="mx-auto max-w-[1440px]">
-          <div className="mb-10 flex justify-center gap-2" aria-label="Filter by audience">
-            {(["Women", "Men"] as const).map((item) => (
-              <button
-                aria-pressed={audience === item}
-                className={`audience-button ${audience === item ? "audience-button-active" : ""}`}
-                key={item}
-                onClick={() => selectAudience(item)}
-              >
-                <strong>{item}</strong>
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-10 flex flex-col justify-between gap-8 sm:flex-row sm:items-end">
+          <div className="product-section-heading mb-10 flex flex-col justify-between gap-8 sm:flex-row sm:items-end">
             <div>
-              <span className="eyebrow text-forest">Essentials, elevated</span>
+              <span className="eyebrow text-brass">SHABA <span aria-hidden="true">/</span> The collection</span>
               <h2 className="mt-4 font-serif text-5xl text-forest sm:text-6xl">{audience} · {category}</h2>
-              <div className="palette-rule mt-6" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
             </div>
             <div className="flex flex-wrap items-center gap-7">
               <div className="flex items-center gap-2 sm:hidden" aria-label="Products per row on mobile">
@@ -230,6 +334,18 @@ export function ShopPage() {
                     onClick={() => setProductColumns(columns)}
                   >
                     <GridViewIcon columns={columns} />
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2" aria-label="Filter by audience">
+                {(["Women", "Men"] as const).map((item) => (
+                  <button
+                    aria-pressed={audience === item}
+                    className={`audience-button ${audience === item ? "audience-button-active" : ""}`}
+                    key={item}
+                    onClick={() => selectAudience(item)}
+                  >
+                    <strong>{item}</strong>
                   </button>
                 ))}
               </div>
@@ -293,6 +409,10 @@ export function ProductDetailPage() {
     };
   }, [slug]);
 
+  useEffect(() => {
+    if (product?.slug) void trackStoreEvent("product_view", { productSlug: product.slug });
+  }, [product?.slug]);
+
   if (!product) return <NotFoundPage />;
 
   const galleryImages = [...new Set([product.image, ...(product.images ?? [])].filter(Boolean))];
@@ -301,31 +421,37 @@ export function ProductDetailPage() {
 
   return (
     <main>
-      <section className="grid lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="bg-[#e4ded2] p-3 sm:p-5 lg:p-8">
-          <img alt={product.name} className="aspect-[4/5] max-h-[78vh] w-full object-cover" src={displayedImage} />
-          {galleryImages.length > 1 && <div aria-label={`${product.name} images`} className="mt-3 flex gap-3 overflow-x-auto pb-1 sm:mt-4 sm:gap-4">
+      <section className="product-detail-page grid bg-sand lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="product-detail-gallery relative p-3 sm:p-5 lg:p-8">
+          <Link className="product-back-link absolute left-6 top-6 z-10 inline-flex items-center gap-2 bg-sand/90 px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-forest transition-colors hover:bg-forest hover:text-sand sm:left-8 sm:top-8" to="/shop">
+            <svg aria-hidden="true" className="size-4 rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+              <path d="M5 12h14m-5-5 5 5-5 5" />
+            </svg>
+            Back to collection
+          </Link>
+          <img alt={product.name} className="product-detail-main-image aspect-[4/5] max-h-[78vh] w-full object-cover" src={displayedImage} />
+          {galleryImages.length > 0 && <div aria-label={`${product.name} images`} className="product-thumbnails mt-3 flex gap-2 overflow-x-auto pb-1 sm:mt-4 sm:gap-3" role="group">
             {galleryImages.map((image, index) => (
               <button
                 aria-label={`Show ${product.name} image ${index + 1}`}
                 aria-pressed={displayedImage === image}
-                className={`size-16 shrink-0 overflow-hidden border-2 transition-colors sm:size-20 ${displayedImage === image ? "border-forest" : "border-transparent opacity-70 hover:opacity-100"}`}
+                className={`product-thumbnail size-[4.25rem] shrink-0 overflow-hidden sm:size-20 ${displayedImage === image ? "product-thumbnail-active" : ""}`}
                 key={`${image}-${index}`}
                 onClick={() => setActiveImage(image)}
                 type="button"
               >
-                <img alt="" className="size-full object-cover" src={image} />
+                <img alt="" className="size-full object-cover" loading="lazy" src={image} />
               </button>
             ))}
           </div>}
         </div>
-        <div className="flex items-start px-6 py-14 sm:px-12 lg:sticky lg:top-24 lg:h-[calc(100vh-6rem)] lg:items-center lg:px-16">
-          <div className="w-full max-w-xl">
-            <Link className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brass" to="/shop">Collection / {product.category}</Link>
-            <h1 className="mt-5 font-serif text-5xl leading-none sm:text-6xl">{product.name}</h1>
-            <p className="mt-5 text-lg font-semibold">{product.price}</p>
-            <p className="mt-8 text-sm leading-7 text-forest/65">{product.description}</p>
-            <div className="mt-9 border-y border-forest/15 py-6">
+        <div className="product-detail-copy-wrap flex items-start px-6 py-10 sm:px-12 sm:py-14 lg:sticky lg:top-24 lg:min-h-[calc(100vh-6rem)] lg:items-center lg:px-16 xl:px-24">
+          <div className="product-detail-copy w-full max-w-lg">
+            <span className="home-section-label text-brass">{product.category} <span aria-hidden="true">/</span> SHABA, BURUNDI</span>
+            <h1 className="mt-4 max-w-xl text-5xl font-medium leading-[0.96] tracking-[-0.06em] sm:text-6xl lg:text-7xl">{product.name}</h1>
+            <p className="product-detail-price mt-5 text-lg font-medium tracking-[-0.02em]">{product.price}</p>
+            <p className="mt-6 max-w-md text-sm leading-7 text-forest/65">{product.description}</p>
+            <div className="product-size-picker mt-7 py-5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em]">Choose size</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {availableSizes.map((size) => (
@@ -340,21 +466,21 @@ export function ProductDetailPage() {
                 ))}
               </div>
             </div>
-            <button className="mt-8 flex min-h-14 w-full items-center justify-between rounded-full bg-forest px-7 text-xs font-semibold uppercase tracking-[0.16em] text-sand transition-colors hover:bg-gold hover:text-forest disabled:cursor-not-allowed disabled:opacity-45" disabled={!selectedSize} onClick={() => { addCartItem(product, selectedSize); setAdded(true); }}>
+            <button className="mt-6 flex min-h-14 w-full max-w-md items-center justify-between bg-forest px-6 text-xs font-semibold uppercase tracking-[0.16em] text-sand transition-colors hover:bg-gold hover:text-forest disabled:cursor-not-allowed disabled:opacity-45" disabled={!selectedSize} onClick={() => { addCartItem(product, selectedSize); void trackStoreEvent("add_to_cart", { productSlug: product.slug }); setAdded(true); }}>
               <span>{added ? "Added to your bag" : selectedSize ? "Add to bag" : "Select a size"}</span>
               <Arrow />
             </button>
-            <div className="mt-8 grid grid-cols-2 gap-5 text-xs leading-5 text-forest/60">
-              <p><strong className="block text-forest">Materials</strong>Full-grain leather and raw brass</p>
-              <p><strong className="block text-forest">Made in</strong>Bujumbura, Burundi</p>
+            <div className="product-detail-meta mt-8 grid max-w-md grid-cols-2 gap-5 pt-5 text-[10px] leading-5 text-forest/60">
+              <p><strong className="mb-1 block text-[9px] font-semibold uppercase tracking-[0.14em] text-forest/80">Collection</strong>{product.category}</p>
+              <p><strong className="mb-1 block text-[9px] font-semibold uppercase tracking-[0.14em] text-forest/80">Made in</strong>Bujumbura, Burundi</p>
             </div>
           </div>
         </div>
       </section>
-      <section className="bg-olive px-5 py-20 text-sand sm:px-8 lg:px-14">
+      <section className="product-note-banner px-5 py-16 text-sand sm:px-8 lg:px-14 lg:py-20">
         <div className="mx-auto grid max-w-[1440px] gap-10 lg:grid-cols-2">
-          <h2 className="font-serif text-5xl">Made to become yours.</h2>
-          <p className="max-w-xl text-sm leading-7 text-sand/70">Natural variations are part of the material’s character. With use, your piece will soften, deepen in tone, and record the journeys you take together.</p>
+          <h2 className="text-4xl font-semibold tracking-[-0.05em] sm:text-5xl">Made here. Made to become yours.</h2>
+          <p className="max-w-xl text-sm leading-7 text-sand/75">Every SHABA piece is made in Burundi with care, character, and the intention to be part of your everyday.</p>
         </div>
       </section>
     </main>
@@ -362,157 +488,39 @@ export function ProductDetailPage() {
 }
 
 export function StoryPage() {
+  const story = getStoryContent();
+
   return (
     <main>
-      <PageIntro eyebrow="Our roots" title="Burundian roots. Timeless perspective." copy="SHABA began with a simple belief: the objects we carry can hold the identity, skill, and ambition of the place where they are made." />
+      <PageIntro eyebrow={story.eyebrow} title={story.title} copy={story.intro} />
       <section className="grid lg:grid-cols-2">
-        <img alt="Green hills overlooking a lake in Burundi" className="min-h-[520px] size-full object-cover lg:min-h-[760px]" src="https://images.unsplash.com/photo-1591216491474-a22d5296fe98?auto=format&fit=crop&w=1400&q=90" />
+        <img alt="Green hills overlooking a lake in Burundi" className="min-h-[520px] size-full object-cover lg:min-h-[760px]" src={story.image} />
         <div className="flex items-center px-7 py-20 sm:px-14 lg:px-20">
           <div className="max-w-xl">
             <span className="eyebrow text-brass">Designed from home</span>
-            <h2 className="mt-6 font-serif text-5xl leading-tight">A modern expression of local craft.</h2>
-            <p className="mt-7 text-sm leading-8 text-forest/65">Every collection begins in Bujumbura. We draw from the clarity of the landscape, the rhythm of city life, and a long tradition of making useful things well.</p>
-            <p className="mt-5 text-sm leading-8 text-forest/65">Our goal is not nostalgia. It is to carry Burundian craft forward through thoughtful design, lasting materials, and meaningful work.</p>
+            <h2 className="mt-6 font-serif text-5xl leading-tight">{story.secondaryTitle}</h2>
+            <p className="mt-7 text-sm leading-8 text-forest/65">{story.secondaryCopy}</p>
+            <p className="mt-5 text-sm leading-8 text-forest/65">{story.secondaryCopyTwo}</p>
           </div>
         </div>
       </section>
-      <section className="bg-olive px-5 py-20 text-sand sm:px-8 lg:px-14 lg:py-28">
+      <section className="story-values px-5 py-16 text-sand sm:px-8 lg:px-14 lg:py-24">
         <div className="mx-auto grid max-w-[1440px] gap-12 lg:grid-cols-[0.8fr_1.2fr]">
           <span className="eyebrow text-gold">What guides us</span>
           <div>
-            <h2 className="font-serif text-5xl leading-tight sm:text-6xl">Build locally. Design openly. Make things worth keeping.</h2>
+            <h2 className="font-serif text-5xl leading-tight sm:text-6xl">{story.valuesTitle}</h2>
             <div className="mt-12 grid gap-8 border-t border-sand/20 pt-8 sm:grid-cols-3">
-              {[["01", "Dignified work"], ["02", "Material honesty"], ["03", "Lasting relevance"]].map(([number, value]) => (
-                <div key={number}><span className="text-xs text-gold">{number}</span><p className="mt-4 font-serif text-2xl">{value}</p></div>
+              {["01", "02", "03"].map((number) => (
+                <div key={number}><span className="text-xs text-gold">{number}</span><p className="mt-4 font-serif text-2xl">{number === "01" ? "Dignified work" : number === "02" ? "Material honesty" : "Lasting relevance"}</p></div>
               ))}
             </div>
           </div>
         </div>
       </section>
-      <section className="px-5 py-20 sm:px-8 lg:px-14 lg:py-28">
+      <section className="story-future px-5 py-16 sm:px-8 lg:px-14 lg:py-24">
         <div className="mx-auto grid max-w-[1440px] items-center gap-14 lg:grid-cols-2">
-          <div><span className="eyebrow text-brass">Looking forward</span><h2 className="mt-5 font-serif text-5xl">A Burundian house with a global horizon.</h2></div>
-          <p className="text-sm leading-8 text-forest/65">We are building SHABA slowly and deliberately: expanding skills, creating meaningful local opportunities, and showing that contemporary African design can be both deeply rooted and confidently international. Every object is part of that longer story.</p>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-export function CraftPage() {
-  const steps = [
-    ["01", "Selection", "Full-grain hides are chosen for strength, feel, and the way they will age."],
-    ["02", "Cutting", "Every panel is measured and cut to preserve the best character of the leather."],
-    ["03", "Assembly", "Edges are finished, hardware is set, and each seam is stitched with precision."],
-    ["04", "Finishing", "The completed piece is conditioned, inspected, and prepared for its next journey."],
-  ];
-  return (
-    <main>
-      <PageIntro eyebrow="Our craft" title="Patient hands. Honest materials." copy="Our process is deliberate because durability is built one careful decision at a time." />
-      <img alt="Leatherworking tools on an artisan’s bench" className="h-[55vh] min-h-[460px] w-full object-cover" src={craftImages.tools} />
-      <section className="px-5 py-20 sm:px-8 lg:px-14 lg:py-28">
-        <div className="mx-auto grid max-w-[1440px] gap-px overflow-hidden bg-forest/15 sm:grid-cols-2 lg:grid-cols-4">
-          {steps.map(([number, title, copy]) => (
-            <article className="bg-sand p-8 lg:p-10" key={number}>
-              <span className="text-[10px] font-semibold tracking-[0.18em] text-gold">{number}</span>
-              <h2 className="mt-12 font-serif text-3xl">{title}</h2>
-              <p className="mt-5 text-sm leading-7 text-forest/60">{copy}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-      <section className="grid bg-forest text-sand lg:grid-cols-2">
-        <img alt="Close-up of leatherworking tools and thread" className="min-h-[520px] size-full object-cover" src={craftImages.detail} />
-        <div className="flex items-center px-7 py-20 sm:px-14 lg:px-20">
-          <div><span className="eyebrow text-gold">Material standard</span><h2 className="mt-6 font-serif text-5xl">Chosen for the years ahead.</h2><p className="mt-7 text-sm leading-8 text-sand/65">We favor full-grain leather, solid hardware, and repairable construction. These materials cost more and ask more of the maker, but they reward the owner with strength, character, and a longer useful life.</p><Link className="underlined-link mt-8" to="/care">Learn how to care for leather <Arrow /></Link></div>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-export function JournalPage() {
-  const [stories, setStories] = useState<JournalEntry[]>(fallbackJournals);
-  useEffect(() => {
-    getJournals().then(setStories);
-  }, []);
-  return (
-    <main>
-      <PageIntro eyebrow="Journal" title="Notes on objects, origins, and making." copy="Stories from the studio and a closer look at the people, materials, and ideas behind SHABA." />
-      <section className="px-5 py-16 sm:px-8 lg:px-14 lg:py-24">
-        <div className="mx-auto grid max-w-[1440px] gap-8 lg:grid-cols-3">
-          {stories.map((story) => (
-            <article key={story.slug}>
-              <Link to={`/journal/${story.slug}`}><img alt="" className="aspect-[4/5] w-full object-cover" src={story.image} /></Link>
-              <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-brass">{story.category}</p>
-              <h2 className="mt-3 font-serif text-3xl leading-tight">{story.title}</h2>
-              <p className="mt-4 text-sm leading-7 text-forest/55">{story.excerpt}</p>
-              <Link className="underlined-link mt-6" to={`/journal/${story.slug}`}>Read story <Arrow /></Link>
-            </article>
-          ))}
-        </div>
-      </section>
-    </main>
-  );
-}
-
-export function JournalDetailPage() {
-  const { slug } = useParams();
-  const [story, setStory] = useState<JournalEntry | null>(fallbackJournals.find((item) => item.slug === slug) ?? null);
-  useEffect(() => {
-    if (slug) getJournal(slug).then(setStory);
-  }, [slug]);
-  if (!story) return <NotFoundPage />;
-  return (
-    <main>
-      <section className="bg-forest px-5 py-20 text-sand sm:px-8 lg:px-14 lg:py-28">
-        <div className="mx-auto max-w-5xl text-center">
-          <span className="eyebrow text-gold">{story.category}</span>
-          <h1 className="mt-6 font-serif text-5xl leading-tight sm:text-7xl">{story.title}</h1>
-          <p className="mx-auto mt-7 max-w-2xl text-sm leading-7 text-sand/65">{story.excerpt}</p>
-        </div>
-      </section>
-      <img alt="" className="h-[60vh] min-h-[480px] w-full object-cover" src={story.image} />
-      <article className="mx-auto max-w-3xl px-6 py-20 sm:py-28">
-        {story.body.map((paragraph, index) => <p className={`text-base leading-8 text-forest/70 ${index ? "mt-7" : "first-letter:float-left first-letter:mr-3 first-letter:font-serif first-letter:text-7xl first-letter:leading-[0.8]"}`} key={index}>{paragraph}</p>)}
-        <div className="mt-14 border-t border-forest/15 pt-8"><Link className="underlined-link" to="/journal">Back to journal <Arrow /></Link></div>
-      </article>
-    </main>
-  );
-}
-
-export function CarePage() {
-  const guidance = [
-    ["Clean gently", "Wipe away dust with a soft, dry cloth. For marks, use a barely damp cloth and let the leather dry naturally."],
-    ["Condition sparingly", "Apply a neutral leather conditioner every few months, testing first on an inconspicuous area."],
-    ["Store thoughtfully", "Keep away from prolonged sun, heat, and humidity. Fill bags lightly to help retain their shape."],
-    ["Let it age", "Small variations, softening, and a deepening patina are signs of genuine leather becoming uniquely yours."],
-  ];
-  return (
-    <main>
-      <PageIntro eyebrow="Care guide" title="Keep it well. Carry it longer." copy="A little regular care protects the leather while allowing its natural character to develop." />
-      <section className="px-5 py-20 sm:px-8 lg:px-14 lg:py-28">
-        <div className="mx-auto max-w-4xl divide-y divide-forest/15">
-          {guidance.map(([title, copy], index) => (
-            <div className="grid gap-5 py-9 sm:grid-cols-[80px_1fr_2fr]" key={title}>
-              <span className="text-xs text-gold">0{index + 1}</span>
-              <h2 className="font-serif text-2xl">{title}</h2>
-              <p className="text-sm leading-7 text-forest/60">{copy}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="bg-olive px-5 py-20 text-sand sm:px-8 lg:px-14">
-        <div className="mx-auto grid max-w-[1440px] gap-12 lg:grid-cols-2">
-          <div><span className="eyebrow text-gold">Common questions</span><h2 className="mt-5 font-serif text-5xl">Care without complication.</h2></div>
-          <div className="divide-y divide-sand/20">
-            {[
-              ["What if my piece gets wet?", "Blot gently, reshape if needed, and let it dry naturally away from direct heat."],
-              ["Can scratches be removed?", "Many light marks blend into the patina. A small amount of conditioner can soften their appearance."],
-              ["How often should I condition it?", "Usually every three to six months, depending on climate and use. The leather should feel supple, never greasy."],
-              ["Do you offer repairs?", "Contact us with photographs and a short description. We will advise on the best next step."],
-            ].map(([question, answer]) => <div className="py-6" key={question}><h3 className="font-serif text-2xl">{question}</h3><p className="mt-3 text-sm leading-7 text-sand/65">{answer}</p></div>)}
-          </div>
+          <div><span className="eyebrow text-brass">Looking forward</span><h2 className="mt-5 font-serif text-5xl">{story.futureTitle}</h2></div>
+          <p className="text-sm leading-8 text-forest/65">{story.futureCopy}</p>
         </div>
       </section>
     </main>
@@ -529,15 +537,15 @@ export function ContactPage() {
             <span className="eyebrow text-brass">Find us</span>
             <div className="mt-8 space-y-7 text-sm leading-7">
               <div><strong className="block font-serif text-2xl">Bujumbura</strong><span className="text-forest/55">Burundi · Visits by appointment</span></div>
-              <div><strong className="block">WhatsApp</strong><a className="text-forest/60 hover:text-forest" href="https://wa.me/250795979106" rel="noreferrer" target="_blank">+250 795 979 106</a></div>
-              <div><strong className="block">Email</strong><a className="text-forest/60 hover:text-forest" href="mailto:hello@shabaleather.com">hello@shabaleather.com</a></div>
+              <div><strong className="block">WhatsApp</strong><a className="text-forest/60 hover:text-forest" href={SHABA_BRAND.whatsappHref} rel="noreferrer" target="_blank">{SHABA_BRAND.contactNumber}</a></div>
+              <div><strong className="block">Email</strong><a className="text-forest/60 hover:text-forest" href={`mailto:${SHABA_BRAND.email}`}>{SHABA_BRAND.email}</a></div>
             </div>
           </div>
-          <form className="rounded-3xl bg-forest p-7 text-sand sm:p-12" onSubmit={(event) => {
+          <form className="contact-form p-7 text-sand sm:p-10" onSubmit={(event) => {
             event.preventDefault();
             const form = new FormData(event.currentTarget);
             const message = `Hello SHABA,\n\nName: ${form.get("name")}\nEmail: ${form.get("email")}\nSubject: ${form.get("subject")}\n\n${form.get("message")}`;
-            window.open(`https://wa.me/250795979106?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+            window.open(`${SHABA_BRAND.whatsappHref}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
           }}>
             <h2 className="font-serif text-4xl">Send a note</h2>
             <div className="mt-8 grid gap-6 sm:grid-cols-2">
@@ -562,7 +570,7 @@ export function RefundPolicyPage() {
   const sections = [
     ["Returns", "If you’re not satisfied with your purchase, you can return or exchange it within 24 hours of receiving it."],
     ["Eligibility", "The item must be unused, unworn, and in its original condition, with all tags and packaging intact. Returns must be requested within 24 hours of delivery or pickup. Proof of purchase, such as a receipt or order confirmation, is required."],
-    ["Process", "Contact us at hello@shabaleather.com or +250 795 979 106. Let us know whether the issue concerns fit, size, or the condition of the product. Arrange for the item to be returned to our shop; return or transport costs are covered by the customer. Once we receive and inspect the product, you can choose between an exchange or a refund."],
+    ["Process", `Contact us at ${SHABA_BRAND.email} or ${SHABA_BRAND.contactNumber}. Let us know whether the issue concerns fit, size, or the condition of the product. Arrange for the item to be returned to our shop; return or transport costs are covered by the customer. Once we receive and inspect the product, you can choose between an exchange or a refund.`],
     ["Exclusions", "Items showing signs of wear or damage caused after delivery cannot be returned. Custom or personalised items may not be eligible for return unless defective."],
   ];
   return (
@@ -578,7 +586,7 @@ export function RefundPolicyPage() {
             </div>
           ))}
           <div className="pt-10">
-            <a className="button" href="https://wa.me/250795979106" rel="noreferrer" target="_blank">Request a return <Arrow /></a>
+            <a className="button" href={SHABA_BRAND.whatsappHref} rel="noreferrer" target="_blank">Request a return <Arrow /></a>
           </div>
         </div>
       </section>
@@ -599,6 +607,7 @@ export function CartPage() {
 
   const submitOrder = async (event: React.FormEvent) => {
     event.preventDefault();
+    void trackStoreEvent("checkout_start");
     setCheckoutError("");
     setOrderSaveWarning("");
     setSubmitting(true);
@@ -640,7 +649,7 @@ export function CartPage() {
       checkout.area ? `Delivery area: ${checkout.area}` : "",
       checkout.note ? `Note: ${checkout.note}` : "",
     ].filter(Boolean).join("\n");
-    const whatsappUrl = `https://wa.me/250795979106?text=${encodeURIComponent(message)}`;
+    const whatsappUrl = `${SHABA_BRAND.whatsappHref}?text=${encodeURIComponent(message)}`;
 
     try {
       if (whatsappWindow) {

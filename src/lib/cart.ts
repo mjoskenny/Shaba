@@ -23,7 +23,9 @@ export function addCartItem(product: Product, size: string) {
   if (existing) existing.quantity += 1;
   else cart.push({ product, quantity: 1, size });
   localStorage.setItem(key, JSON.stringify(cart));
-  window.dispatchEvent(new Event("shaba-cart-change"));
+  window.dispatchEvent(new CustomEvent("shaba-cart-change", {
+    detail: { addedItem: { product, quantity: existing?.quantity ?? 1, size } satisfies CartItem },
+  }));
 }
 
 export function updateCartItem(slug: string, size: string, quantity: number) {

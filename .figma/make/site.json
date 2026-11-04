@@ -1,7 +1,15 @@
 {
-  "description": "Showcase and sell premium leather products through a modern, minimalist online store designed for a seamless shopping experience in Burundi.",
+  "title": "SHABA | Crafted in Burundi",
+  "description": "SHABA creates contemporary leather goods and everyday essentials in Burundi with thoughtful design, honest materials, and lasting craftsmanship.",
+  "language": "en",
   "robots": {
     "index": true
+  },
+  "icons": {
+    "icon": "/shaba-wordmark-mask.png"
+  },
+  "openGraph": {
+    "image": "https://shabaleather.com/shaba-wordmark-mask.png"
   },
   "accessibility": {
     "addBypassLinks": false,

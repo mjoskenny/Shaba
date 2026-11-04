@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { normalizeProductSizes, type Product } from "../data";
-import { adminApi, type OrderRecord } from "../lib/api";
-import { supabase } from "../lib/supabase";
-import type { JournalEntry } from "../journals";
+import { adminApi, type OrderRecord, type StoreInsights } from "../lib/api";
+import { createSiteMediaEntry, getSiteMedia, getStoryContent, saveSiteMedia, saveStoryContent, siteMediaSections, type SiteMediaItem } from "../lib/site-content";
+import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const emptyProduct: Product = {
   slug: "",
@@ -18,52 +18,43 @@ const emptyProduct: Product = {
   sizes: ["One size"],
 };
 
-const emptyJournal: JournalEntry = {
-  slug: "",
-  category: "Studio notes",
-  title: "",
-  excerpt: "",
-  image: "",
-  body: [""],
-  published: true,
-};
-
 export default function AdminPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
-  const [journalApiError, setJournalApiError] = useState("");
-  const [tab, setTab] = useState<"products" | "journals" | "orders">("products");
+  const [tab, setTab] = useState<"insights" | "products" | "categories" | "content" | "orders">("insights");
+  const [insights, setInsights] = useState<StoreInsights | null>(null);
+  const [insightsPeriod, setInsightsPeriod] = useState<7 | 30 | 90>(30);
   const [products, setProducts] = useState<Product[]>([]);
-  const [journals, setJournals] = useState<JournalEntry[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [newCategory, setNewCategory] = useState("");
+  const [contentItems, setContentItems] = useState<SiteMediaItem[]>([]);
+  const [contentDraft, setContentDraft] = useState<SiteMediaItem>(createSiteMediaEntry({ section: "hero" }));
+  const [storyContent, setStoryContent] = useState(getStoryContent());
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [editing, setEditing] = useState<Product | null>(null);
   const [sizesInput, setSizesInput] = useState("");
-  const [editingJournal, setEditingJournal] = useState<JournalEntry | null>(null);
   const [originalSlug, setOriginalSlug] = useState<string>();
   const [uploading, setUploading] = useState(false);
 
   const loadDashboard = async () => {
-    const [catalogResult, journalResult, orderResult] = await Promise.allSettled([
+    const [catalogResult, categoryResult, orderResult, insightsResult] = await Promise.allSettled([
       adminApi.products(),
-      adminApi.journals(),
+      adminApi.categories(),
       adminApi.orders(),
+      adminApi.insights(insightsPeriod),
     ]);
 
     if (catalogResult.status === "fulfilled") setProducts(catalogResult.value);
+    if (categoryResult.status === "fulfilled") setCategories(categoryResult.value.map((category) => category.name));
     if (orderResult.status === "fulfilled") {
       setOrders(orderResult.value.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     }
-    if (journalResult.status === "fulfilled") {
-      setJournals(journalResult.value);
-      setJournalApiError("");
-    } else {
-      setJournals([]);
-      setJournalApiError(journalResult.reason instanceof Error ? journalResult.reason.message : "Unable to load journal stories");
-    }
+    if (insightsResult.status === "fulfilled") setInsights(insightsResult.value);
+    setContentItems(getSiteMedia());
 
-    const dashboardError = [catalogResult, orderResult].find((result) => result.status === "rejected");
+    const dashboardError = [catalogResult, categoryResult, orderResult, insightsResult].find((result) => result.status === "rejected");
     setMessage(dashboardError?.status === "rejected"
       ? dashboardError.reason instanceof Error ? dashboardError.reason.message : "Unable to load dashboard"
       : "");
@@ -76,14 +67,22 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (session) loadDashboard();
-  }, [session]);
+    if (session) void loadDashboard();
+  }, [session, insightsPeriod]);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!isSupabaseConfigured) {
+      setMessage("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable admin access.");
+      return;
+    }
     setMessage("Signing in…");
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setMessage(error ? error.message : "");
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setMessage(error ? error.message : "");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to sign in");
+    }
   };
 
   const saveProduct = async (event: React.FormEvent) => {
@@ -109,27 +108,70 @@ export default function AdminPage() {
     }
   };
 
-  const saveJournal = async (event: React.FormEvent) => {
+  const createCategory = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!editingJournal) return;
+    const name = newCategory.trim();
+    if (!name) return;
     try {
-      await adminApi.saveJournal(editingJournal, originalSlug);
-      setEditingJournal(null);
-      setOriginalSlug(undefined);
+      await adminApi.saveCategory(name);
+      setNewCategory("");
+      setMessage("");
       await loadDashboard();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to save journal");
+      setMessage(error instanceof Error ? error.message : "Unable to create category");
     }
   };
 
-  const removeJournal = async (slug: string) => {
-    if (!window.confirm("Remove this journal story?")) return;
+  const removeCategory = async (name: string) => {
+    if (!window.confirm(`Delete the ${name} category?`)) return;
+    const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     try {
-      await adminApi.deleteJournal(slug);
+      await adminApi.deleteCategory(slug);
       await loadDashboard();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to remove journal story");
+      setMessage(error instanceof Error ? error.message : "Unable to remove category");
     }
+  };
+
+  const resetContentDraft = () => setContentDraft({ ...createSiteMediaEntry({ section: "hero" }), id: "" });
+
+  const saveContentItem = (event: React.FormEvent) => {
+    event.preventDefault();
+    const cleaned = {
+      ...contentDraft,
+      title: contentDraft.title.trim(),
+      subtitle: contentDraft.subtitle.trim(),
+      alt: contentDraft.alt.trim() || contentDraft.title.trim(),
+      image: contentDraft.image.trim(),
+      href: contentDraft.href.trim() || "/shop",
+    };
+
+    if (!cleaned.image) {
+      setMessage("Add an image URL before saving a media item.");
+      return;
+    }
+
+    const nextItems = contentDraft.id
+      ? contentItems.map((item) => item.id === contentDraft.id ? cleaned : item)
+      : [...contentItems, cleaned];
+
+    saveSiteMedia(nextItems);
+    setContentItems(nextItems);
+    setMessage("");
+    resetContentDraft();
+  };
+
+  const removeContentItem = (id: string) => {
+    const nextItems = contentItems.filter((item) => item.id !== id);
+    saveSiteMedia(nextItems);
+    setContentItems(nextItems);
+    if (contentDraft.id === id) resetContentDraft();
+  };
+
+  const saveStorySettings = (event: React.FormEvent) => {
+    event.preventDefault();
+    saveStoryContent(storyContent);
+    setMessage("Story content saved.");
   };
 
   const updateOrderStatus = async (id: string, status: string) => {
@@ -150,6 +192,36 @@ export default function AdminPage() {
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to upload image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadContentImage = async (file?: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    setMessage("Uploading content image…");
+    try {
+      const { url } = await adminApi.uploadImage(file);
+      setContentDraft((current) => ({ ...current, image: url }));
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to upload content image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadStoryImage = async (file?: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    setMessage("Uploading story image…");
+    try {
+      const { url } = await adminApi.uploadImage(file);
+      setStoryContent((current) => ({ ...current, image: url }));
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to upload story image");
     } finally {
       setUploading(false);
     }
@@ -237,19 +309,97 @@ export default function AdminPage() {
             <span className="eyebrow text-brass">Dashboard</span>
             <h2 className="mt-2 font-serif text-4xl">Catalog and orders</h2>
           </div>
-          <div className="flex gap-2">
-            {(["products", "journals", "orders"] as const).map((item) => (
+          <div className="flex flex-wrap gap-2">
+            {(["insights", "products", "categories", "content", "orders"] as const).map((item) => (
               <button className={`rounded-full px-5 py-3 text-xs font-semibold capitalize ${tab === item ? "bg-forest text-sand" : "bg-forest/5"}`} key={item} onClick={() => setTab(item)}>{item}</button>
             ))}
           </div>
         </div>
-        {message && <div className="mt-6 border border-brass/30 bg-brass/10 p-4 text-sm">{message}</div>}
+        {message && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border border-brass/30 bg-brass/10 p-4 text-sm">
+            <span>{message}</span>
+            <button className="font-semibold underline" onClick={loadDashboard} type="button">Retry</button>
+          </div>
+        )}
 
-        {tab === "products" ? (
+        {tab === "insights" ? (
+          <section className="mt-8">
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-brass">Store pulse</p>
+                <h3 className="mt-1 font-serif text-3xl">The business, at a glance.</h3>
+                <p className="mt-2 text-xs text-forest/55">A random browser ID counts returning visits. Analytics do not collect contact details or IP addresses.</p>
+              </div>
+              <label className="text-[9px] font-semibold uppercase tracking-[0.14em] text-forest/55">Reporting period
+                <select className="ml-3 rounded-full border border-forest/15 bg-transparent px-4 py-3 text-xs text-forest" onChange={(event) => setInsightsPeriod(Number(event.target.value) as 7 | 30 | 90)} value={insightsPeriod}>
+                  <option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
+                </select>
+              </label>
+            </div>
+            {!insights ? (
+              <div className="rounded-2xl bg-white p-8 text-sm text-forest/55">Insights are not available yet. Check the analytics migration and Edge Function deployment, then retry.</div>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <InsightMetric label="Visits" value={insights.visits.toLocaleString()} note={`${insights.uniqueVisitors.toLocaleString()} unique browsers`} />
+                  <InsightMetric label="Clicks" value={insights.clicks.toLocaleString()} note={`${insights.productViews.toLocaleString()} product views`} />
+                  <InsightMetric label="Added to bag" value={insights.addToCart.toLocaleString()} note={`${insights.checkoutStarts.toLocaleString()} checkout starts`} />
+                  <InsightMetric label="Orders" value={insights.orders.toLocaleString()} note={`${formatBif(insights.orderValue)} recorded order value`} />
+                  <InsightMetric label="Average order" value={formatBif(insights.averageOrderValue)} note={`${insights.conversionRate.toFixed(1)}% visit-to-order rate`} />
+                </div>
+
+                <div className="mt-5 grid gap-5 xl:grid-cols-[1.4fr_0.8fr]">
+                  <section className="rounded-2xl bg-white p-5 sm:p-7">
+                    <div className="flex items-end justify-between gap-4">
+                      <div><p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Traffic & orders</p><h4 className="mt-1 font-serif text-2xl">Daily activity</h4></div>
+                      <div className="flex gap-4 text-[9px] uppercase tracking-[0.12em] text-forest/55"><span><i className="mr-1 inline-block size-2 bg-olive" />Visits</span><span><i className="mr-1 inline-block size-2 bg-gold" />Orders</span></div>
+                    </div>
+                    <div className="mt-7 flex h-44 items-end gap-[3px] border-b border-forest/10 pb-2 sm:gap-1" role="img" aria-label={`Daily visits and orders in the last ${insights.periodDays} days`}>
+                      {insights.daily.map((day) => {
+                        const max = Math.max(1, ...insights.daily.map((entry) => entry.visits));
+                        return (
+                          <div className="flex h-full min-w-0 flex-1 items-end justify-center gap-[2px]" key={day.date} title={`${day.date}: ${day.visits} visits, ${day.orders} orders`}>
+                            <span className="w-1/2 bg-olive/75 sm:max-w-3" style={{ height: `${Math.max(day.visits ? 5 : 1, (day.visits / max) * 100)}%` }} />
+                            <span className="w-1/2 bg-gold sm:max-w-3" style={{ height: `${Math.max(day.orders ? 5 : 1, (day.orders / max) * 100)}%` }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 flex justify-between text-[9px] text-forest/45"><span>{insights.daily[0]?.date}</span><span>{insights.daily[insights.daily.length - 1]?.date}</span></div>
+                  </section>
+
+                  <section className="rounded-2xl bg-[#e1d7c8] p-5 sm:p-7">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Shopping journey</p>
+                    <h4 className="mt-1 font-serif text-2xl">From visit to order</h4>
+                    <div className="mt-6 space-y-4">
+                      <FunnelStep label="Visits" value={insights.visits} total={insights.visits} />
+                      <FunnelStep label="Product views" value={insights.productViews} total={insights.visits} />
+                      <FunnelStep label="Added to bag" value={insights.addToCart} total={insights.visits} />
+                      <FunnelStep label="Checkout started" value={insights.checkoutStarts} total={insights.visits} />
+                      <FunnelStep label="Orders saved" value={insights.orders} total={insights.visits} />
+                    </div>
+                  </section>
+                </div>
+
+                <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                  <InsightsList title="Popular pages" empty="No page visits recorded in this period." items={insights.topPages.map((item) => ({ label: item.path, value: `${item.views} views` }))} />
+                  <InsightsList title="Products getting attention" empty="No product activity recorded in this period." items={insights.topProducts.map((item) => ({ label: item.slug, value: `${item.views} views · ${item.adds} bag adds` }))} />
+                </div>
+
+                <section className="mt-5 rounded-2xl bg-white p-5 sm:p-7">
+                  <div className="flex items-end justify-between gap-4"><div><p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Latest activity</p><h4 className="mt-1 font-serif text-2xl">Recent orders</h4></div><button className="text-[9px] font-semibold uppercase tracking-[0.12em] underline" onClick={() => setTab("orders")} type="button">Manage orders</button></div>
+                  {insights.recentOrders.length ? <div className="mt-5 divide-y divide-forest/10">
+                    {insights.recentOrders.slice(0, 5).map((order) => <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs" key={order.id}><span>{order.customer?.name ?? "Customer"} · {new Date(order.createdAt).toLocaleDateString()}</span><span className="font-semibold">{order.total}</span><span className="rounded-full bg-olive/10 px-3 py-1 text-[9px] uppercase tracking-[0.1em]">{order.status}</span></div>)}
+                  </div> : <p className="mt-5 text-xs text-forest/50">No orders recorded in this period.</p>}
+                </section>
+              </>
+            )}
+          </section>
+        ) : tab === "products" ? (
           <section className="mt-8">
             <div className="mb-5 flex items-center justify-between">
               <p className="text-sm text-forest/60">{products.length} products</p>
-              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold" onClick={() => { setEditing({ ...emptyProduct }); setSizesInput(normalizeProductSizes(emptyProduct.sizes).join(", ")); setOriginalSlug(undefined); }}>Add product</button>
+              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold" onClick={() => { setEditing({ ...emptyProduct, category: categories[0] ?? "" }); setSizesInput(normalizeProductSizes(emptyProduct.sizes).join(", ")); setOriginalSlug(undefined); }}>Add product</button>
             </div>
             <div className="overflow-x-auto rounded-2xl bg-white">
               <table className="w-full min-w-[760px] text-left text-sm">
@@ -272,29 +422,155 @@ export default function AdminPage() {
               </table>
             </div>
           </section>
-        ) : tab === "journals" ? (
+        ) : tab === "categories" ? (
           <section className="mt-8">
-            {journalApiError && <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border border-brass/30 bg-brass/10 p-4 text-sm"><span>Journal management is unavailable: {journalApiError}. Deploy the latest Supabase Edge Function to enable it.</span><button className="font-semibold underline" onClick={loadDashboard}>Retry</button></div>}
-            <div className="mb-5 flex items-center justify-between">
-              <p className="text-sm text-forest/60">{journals.length} journal stories</p>
-              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50" disabled={Boolean(journalApiError)} onClick={() => { setEditingJournal({ ...emptyJournal, body: [""] }); setOriginalSlug(undefined); }}>Add story</button>
-            </div>
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {journals.map((journal) => (
-                <article className="overflow-hidden rounded-2xl bg-white" key={journal.slug}>
-                  <img alt="" className="aspect-[16/9] w-full object-cover" src={journal.image} />
-                  <div className="p-6">
-                    <p className="text-[9px] uppercase tracking-[0.16em] text-brass">{journal.category}</p>
-                    <h3 className="mt-2 font-serif text-2xl">{journal.title}</h3>
-                    <p className="mt-3 line-clamp-2 text-xs leading-5 text-forest/55">{journal.excerpt}</p>
-                    <div className="mt-6 flex justify-between">
-                      <button className="text-xs font-semibold" disabled={Boolean(journalApiError)} onClick={() => { setEditingJournal({ ...journal, body: [...journal.body] }); setOriginalSlug(journal.slug); }}>Edit</button>
-                      <button className="text-xs text-brass" disabled={Boolean(journalApiError)} onClick={() => removeJournal(journal.slug)}>Delete</button>
-                    </div>
+            <form className="flex max-w-xl flex-col gap-3 rounded-2xl bg-white p-5 sm:flex-row" onSubmit={createCategory}>
+              <input aria-label="New category name" className="min-w-0 flex-1 border-b border-forest/20 bg-transparent px-2 py-3 text-sm outline-none focus:border-forest" onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Clothing" required value={newCategory} />
+              <button className="rounded-full bg-gold px-5 py-3 text-xs font-semibold" type="submit">Create category</button>
+            </form>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {categories.map((category) => (
+                <article className="flex items-center justify-between gap-4 rounded-2xl bg-white p-5" key={category}>
+                  <div>
+                    <h3 className="font-semibold">{category}</h3>
+                    <p className="mt-1 text-xs text-forest/55">{products.filter((product) => product.category === category).length} products</p>
                   </div>
+                  <button aria-label={`Delete ${category} category`} className="text-xs text-brass underline" onClick={() => removeCategory(category)} type="button">Delete</button>
                 </article>
               ))}
             </div>
+          </section>
+        ) : tab === "content" ? (
+          <section className="mt-8 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+            <form className="rounded-2xl bg-white p-5 sm:p-7" onSubmit={saveContentItem}>
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Brand media</p>
+                  <h3 className="mt-1 font-serif text-3xl">Hero and landing visuals</h3>
+                </div>
+                <button className="text-[9px] font-semibold uppercase tracking-[0.12em] underline" onClick={resetContentDraft} type="button">New item</button>
+              </div>
+              <label className="mt-6 block text-[10px] font-semibold uppercase tracking-[0.14em]">Section
+                <select className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm" onChange={(event) => setContentDraft({ ...contentDraft, section: event.target.value as SiteMediaItem["section"] })} value={contentDraft.section}>
+                  {siteMediaSections.map((section) => <option key={section.value} value={section.value}>{section.label}</option>)}
+                </select>
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Title
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, title: event.target.value })} value={contentDraft.title} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Subtitle
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, subtitle: event.target.value })} value={contentDraft.subtitle} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Image URL
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, image: event.target.value })} placeholder="https://..." value={contentDraft.image} />
+              </label>
+              <div className="mt-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-forest/75">Upload image</p>
+                <input
+                  accept="image/*"
+                  className="mt-3 block w-full cursor-pointer rounded-xl border border-dashed border-forest/20 bg-[#f7f3ee] px-3 py-4 text-xs text-forest/70 file:mr-4 file:rounded-full file:border-0 file:bg-forest file:px-4 file:py-2 file:text-[10px] file:font-semibold file:uppercase file:tracking-[0.14em] file:text-sand"
+                  disabled={uploading}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    void uploadContentImage(file);
+                    event.target.value = "";
+                  }}
+                  type="file"
+                />
+              </div>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Link
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, href: event.target.value })} value={contentDraft.href} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Alt text
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, alt: event.target.value })} value={contentDraft.alt} />
+              </label>
+              <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest" type="submit">{contentItems.some((item) => item.id === contentDraft.id) ? "Save media" : "Add media"}</button>
+            </form>
+
+            <div className="space-y-3">
+              {siteMediaSections.map(({ value, label }) => (
+                <article className="rounded-2xl bg-white p-4" key={value}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h4 className="font-serif text-2xl">{label}</h4>
+                    <span className="text-[9px] uppercase tracking-[0.12em] text-forest/50">{contentItems.filter((item) => item.section === value).length}</span>
+                  </div>
+                  {contentItems.filter((item) => item.section === value).length ? (
+                    <div className="space-y-2">
+                      {contentItems.filter((item) => item.section === value).map((item) => (
+                        <div className="flex items-center gap-3 rounded-xl border border-forest/10 bg-[#f8f5f1] p-2" key={item.id}>
+                          <img alt={item.alt || item.title} className="size-14 rounded-lg object-cover" src={item.image} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold">{item.title || "Untitled image"}</p>
+                            <p className="truncate text-[10px] text-forest/55">{item.subtitle || "Custom SHABA artwork"}</p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button className="text-[9px] font-semibold underline" onClick={() => setContentDraft(item)} type="button">Edit</button>
+                            <button className="text-[9px] text-brass underline" onClick={() => removeContentItem(item.id)} type="button">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-forest/50">No images saved for this section yet.</p>
+                  )}
+                </article>
+              ))}
+            </div>
+
+            <form className="rounded-2xl bg-white p-5 sm:p-7" onSubmit={saveStorySettings}>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Story page</p>
+              <h3 className="mt-1 font-serif text-3xl">Edit narrative</h3>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Eyebrow
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setStoryContent({ ...storyContent, eyebrow: event.target.value })} value={storyContent.eyebrow} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Title
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setStoryContent({ ...storyContent, title: event.target.value })} value={storyContent.title} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Intro copy
+                <textarea className="mt-2 min-h-24 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setStoryContent({ ...storyContent, intro: event.target.value })} value={storyContent.intro} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Main image URL
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setStoryContent({ ...storyContent, image: event.target.value })} value={storyContent.image} />
+              </label>
+              <div className="mt-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-forest/75">Story image preview</p>
+                {storyContent.image ? (
+                  <img alt="Story preview" className="mt-3 h-44 w-full rounded-2xl object-cover" src={storyContent.image} />
+                ) : (
+                  <div className="mt-3 flex h-44 items-center justify-center rounded-2xl border border-dashed border-forest/20 bg-[#f7f3ee] text-xs text-forest/55">No image yet</div>
+                )}
+                <input
+                  accept="image/*"
+                  className="mt-3 block w-full cursor-pointer rounded-xl border border-dashed border-forest/20 bg-[#f7f3ee] px-3 py-4 text-xs text-forest/70 file:mr-4 file:rounded-full file:border-0 file:bg-forest file:px-4 file:py-2 file:text-[10px] file:font-semibold file:uppercase file:tracking-[0.14em] file:text-sand"
+                  disabled={uploading}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    void uploadStoryImage(file);
+                    event.target.value = "";
+                  }}
+                  type="file"
+                />
+              </div>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Secondary title
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setStoryContent({ ...storyContent, secondaryTitle: event.target.value })} value={storyContent.secondaryTitle} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Secondary paragraph
+                <textarea className="mt-2 min-h-24 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setStoryContent({ ...storyContent, secondaryCopy: event.target.value })} value={storyContent.secondaryCopy} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Second paragraph
+                <textarea className="mt-2 min-h-24 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setStoryContent({ ...storyContent, secondaryCopyTwo: event.target.value })} value={storyContent.secondaryCopyTwo} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Values heading
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setStoryContent({ ...storyContent, valuesTitle: event.target.value })} value={storyContent.valuesTitle} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Future title
+                <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setStoryContent({ ...storyContent, futureTitle: event.target.value })} value={storyContent.futureTitle} />
+              </label>
+              <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Future copy
+                <textarea className="mt-2 min-h-24 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setStoryContent({ ...storyContent, futureCopy: event.target.value })} value={storyContent.futureCopy} />
+              </label>
+              <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest" type="submit">Save story</button>
+            </form>
           </section>
         ) : (
           <section className="mt-8 space-y-4">
@@ -335,7 +611,12 @@ export default function AdminPage() {
             <div className="mt-8 grid gap-5 sm:grid-cols-2">
               <AdminField label="Name" value={editing.name} onChange={(name) => setEditing({ ...editing, name })} />
               <AdminField label="Slug" value={editing.slug} onChange={(slug) => setEditing({ ...editing, slug })} />
-              <AdminField label="Category" value={editing.category} onChange={(category) => setEditing({ ...editing, category })} />
+              <label className="text-[10px] font-semibold uppercase tracking-[0.14em]">Category
+                <select className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm" onChange={(event) => setEditing({ ...editing, category: event.target.value })} required value={editing.category}>
+                  {!categories.includes(editing.category) && editing.category && <option>{editing.category}</option>}
+                  {categories.map((category) => <option key={category}>{category}</option>)}
+                </select>
+              </label>
               <AdminField label="Price" value={editing.price} onChange={(price) => setEditing({ ...editing, price })} />
               <AdminField label="Inventory" type="number" value={String(editing.inventory ?? 0)} onChange={(inventory) => setEditing({ ...editing, inventory: Number(inventory) })} />
               <label className="text-[10px] font-semibold uppercase tracking-[0.14em]">Audience
@@ -369,34 +650,6 @@ export default function AdminPage() {
         </div>
       )}
 
-      {editingJournal && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-forest/45">
-          <form className="h-full w-full max-w-2xl overflow-y-auto bg-sand p-7 shadow-2xl sm:p-10" onSubmit={saveJournal}>
-            <div className="flex items-center justify-between">
-              <h2 className="font-serif text-3xl">{originalSlug ? "Edit journal story" : "New journal story"}</h2>
-              <button aria-label="Close editor" className="text-2xl" onClick={() => setEditingJournal(null)} type="button">×</button>
-            </div>
-            <div className="mt-8 grid gap-5 sm:grid-cols-2">
-              <AdminField label="Title" value={editingJournal.title} onChange={(title) => setEditingJournal({ ...editingJournal, title })} />
-              <AdminField label="Slug" value={editingJournal.slug} onChange={(slug) => setEditingJournal({ ...editingJournal, slug })} />
-              <AdminField label="Category" value={editingJournal.category} onChange={(category) => setEditingJournal({ ...editingJournal, category })} />
-            </div>
-            <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Cover image
-              <input accept="image/*" className="mt-2 block w-full rounded-xl border border-forest/15 p-4 text-xs" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadImage(file, (image) => setEditingJournal({ ...editingJournal, image })); }} type="file" />
-            </label>
-            {editingJournal.image && <img alt="Story preview" className="mt-4 aspect-[16/9] w-full rounded-xl object-cover" src={editingJournal.image} />}
-            <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Excerpt
-              <textarea className="mt-2 min-h-24 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setEditingJournal({ ...editingJournal, excerpt: event.target.value })} value={editingJournal.excerpt} />
-            </label>
-            <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Article body
-              <textarea className="mt-2 min-h-72 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-7" onChange={(event) => setEditingJournal({ ...editingJournal, body: event.target.value.split("\n\n") })} value={editingJournal.body.join("\n\n")} />
-              <span className="mt-2 block normal-case tracking-normal text-forest/45">Separate paragraphs with a blank line.</span>
-            </label>
-            <label className="mt-5 flex items-center gap-3 text-sm"><input checked={editingJournal.published !== false} onChange={(event) => setEditingJournal({ ...editingJournal, published: event.target.checked })} type="checkbox" /> Published in journal</label>
-            <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest">Save story</button>
-          </form>
-        </div>
-      )}
     </div>
   );
 }
@@ -406,5 +659,40 @@ function AdminField({ label, value, onChange, type = "text" }: { label: string; 
     <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">{label}
       <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => onChange(event.target.value)} required type={type} value={value} />
     </label>
+  );
+}
+
+function formatBif(value: number) {
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value)} BIF`;
+}
+
+function InsightMetric({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <article className="rounded-2xl bg-white p-5 sm:p-6">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-forest/50">{label}</p>
+      <p className="mt-3 text-3xl font-semibold tracking-[-0.06em]">{value}</p>
+      <p className="mt-2 text-[10px] text-forest/50">{note}</p>
+    </article>
+  );
+}
+
+function FunnelStep({ label, value, total }: { label: string; value: number; total: number }) {
+  const width = total ? Math.max(value ? 3 : 0, (value / total) * 100) : 0;
+  return (
+    <div>
+      <div className="mb-1 flex justify-between gap-3 text-[10px]"><span>{label}</span><strong>{value.toLocaleString()}</strong></div>
+      <div className="h-1.5 bg-forest/10"><div className="h-full bg-olive transition-[width]" style={{ width: `${width}%` }} /></div>
+    </div>
+  );
+}
+
+function InsightsList({ title, empty, items }: { title: string; empty: string; items: Array<{ label: string; value: string }> }) {
+  return (
+    <section className="rounded-2xl bg-white p-5 sm:p-7">
+      <h4 className="font-serif text-2xl">{title}</h4>
+      {items.length ? <div className="mt-4 divide-y divide-forest/10">
+        {items.map((item) => <div className="flex items-center justify-between gap-4 py-3 text-xs" key={item.label}><span className="truncate">{item.label}</span><span className="shrink-0 text-forest/55">{item.value}</span></div>)}
+      </div> : <p className="mt-4 text-xs text-forest/50">{empty}</p>}
+    </section>
   );
 }

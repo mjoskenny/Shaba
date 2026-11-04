@@ -1,9 +1,9 @@
 import type { Product } from "../data";
 import { products as fallbackProducts } from "../data";
-import { apiBase, supabase, supabaseAnonKey } from "./supabase";
-import { fallbackJournals, type JournalEntry } from "../journals";
+import { apiBase, assertSupabaseConfigured, supabase, supabaseAnonKey } from "./supabase";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  assertSupabaseConfigured();
   const { data } = await supabase.auth.getSession();
   const response = await fetch(`${apiBase}${path}`, {
     ...options,
@@ -37,41 +37,26 @@ export async function getProduct(slug: string) {
   }
 }
 
-export async function getJournals() {
-  try {
-    return await request<JournalEntry[]>("/journals");
-  } catch {
-    return fallbackJournals;
-  }
-}
-
-export async function getJournal(slug: string) {
-  try {
-    return await request<JournalEntry>(`/journals/${slug}`);
-  } catch {
-    return fallbackJournals.find((journal) => journal.slug === slug) ?? null;
-  }
-}
-
 export const adminApi = {
   products: () => request<Product[]>("/admin/products"),
+  insights: (days: 7 | 30 | 90) => request<StoreInsights>(`/admin/insights?days=${days}`),
+  categories: () => request<CategoryRecord[]>("/admin/categories"),
+  saveCategory: (name: string) => request<CategoryRecord>("/admin/categories", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  }),
+  deleteCategory: (slug: string) => request<{ success: boolean }>(`/admin/categories/${encodeURIComponent(slug)}`, { method: "DELETE" }),
   orders: () => request<OrderRecord[]>("/admin/orders"),
-  journals: () => request<JournalEntry[]>("/admin/journals"),
   saveProduct: (product: Product, originalSlug?: string) =>
-    request<Product>(originalSlug ? `/admin/products/${originalSlug}` : "/admin/products", {
+    request<Product>(originalSlug ? `/admin/products/${encodeURIComponent(originalSlug)}` : "/admin/products", {
       method: originalSlug ? "PUT" : "POST",
       body: JSON.stringify(product),
     }),
-  deleteProduct: (slug: string) => request<{ success: boolean }>(`/admin/products/${slug}`, { method: "DELETE" }),
+  deleteProduct: (slug: string) => request<{ success: boolean }>(`/admin/products/${encodeURIComponent(slug)}`, { method: "DELETE" }),
   updateOrder: (id: string, status: string) =>
     request<OrderRecord>(`/admin/orders/${id}`, { method: "PUT", body: JSON.stringify({ status }) }),
-  saveJournal: (journal: JournalEntry, originalSlug?: string) =>
-    request<JournalEntry>(originalSlug ? `/admin/journals/${originalSlug}` : "/admin/journals", {
-      method: originalSlug ? "PUT" : "POST",
-      body: JSON.stringify(journal),
-    }),
-  deleteJournal: (slug: string) => request<{ success: boolean }>(`/admin/journals/${slug}`, { method: "DELETE" }),
   uploadImage: async (file: File) => {
+    assertSupabaseConfigured();
     const { data } = await supabase.auth.getSession();
     const form = new FormData();
     form.append("file", file);
@@ -86,6 +71,29 @@ export const adminApi = {
     if (!response.ok) throw new Error(body.error ?? body.message ?? "Upload failed");
     return body as { url: string };
   },
+};
+
+export type StoreInsights = {
+  periodDays: number;
+  visits: number;
+  uniqueVisitors: number;
+  clicks: number;
+  productViews: number;
+  addToCart: number;
+  checkoutStarts: number;
+  orders: number;
+  orderValue: number;
+  averageOrderValue: number;
+  conversionRate: number;
+  daily: Array<{ date: string; visits: number; orders: number }>;
+  topPages: Array<{ path: string; views: number }>;
+  topProducts: Array<{ slug: string; views: number; adds: number }>;
+  recentOrders: OrderRecord[];
+};
+
+export type CategoryRecord = {
+  slug: string;
+  name: string;
 };
 
 export type OrderCustomer = {
