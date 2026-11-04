@@ -1,7 +1,7 @@
 import { SHABA_BRAND } from "./brand";
 import { products } from "../data";
 
-const BASE_URL = SHABA_BRAND.website;
+const BASE_URL = "https://www.shabacrafts.store";
 const DEFAULT_IMAGE = `${BASE_URL}/shaba-wordmark-mask.png`;
 
 export type SeoConfig = {
