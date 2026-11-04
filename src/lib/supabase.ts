@@ -1,11 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
-const configuredSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
-const configuredSupabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+// These public client credentials are safe to ship in browser code. Keep env
+// overrides for deployments that intentionally target a different Supabase project.
+const defaultSupabaseUrl = "https://xkdkiznlmasseskakjkd.supabase.co";
+const defaultSupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhrZGtpem5sbWFzc2Vza2FramtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2MzMzOTUsImV4cCI6MjEwNzIwOTM5NX0.7zxgG9WjBFTyaU8rqHjALzZgwJTKoRCcPyzt0lF4prw";
+const configuredSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || defaultSupabaseUrl;
+const configuredSupabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || defaultSupabaseAnonKey;
 
 export const isSupabaseConfigured = Boolean(configuredSupabaseUrl && configuredSupabaseAnonKey);
-const supabaseUrl = configuredSupabaseUrl || "http://127.0.0.1:54321";
-export const supabaseAnonKey = configuredSupabaseAnonKey || "local-development-key-not-configured";
+const supabaseUrl = configuredSupabaseUrl;
+export const supabaseAnonKey = configuredSupabaseAnonKey;
 
 export function assertSupabaseConfigured() {
   if (!isSupabaseConfigured) {
