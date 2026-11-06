@@ -43,11 +43,7 @@ const NavIcon = ({ name }: { name: "bag" | "menu" | "close" }) => {
 
 const Wordmark = () => (
   <Link aria-label="SHABA home" className="brand-mark text-sand" to="/">
-    <img
-      alt="SHABA home"
-      className="brand-logo-art"
-      src="/shaba-wordmark-mask-trans.png"
-    />
+    <span aria-hidden="true" className="brand-logo-art" />
   </Link>
 );
 
