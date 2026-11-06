@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import ProductCard from "../components/ProductCard";
+import BrandLogo from "../components/BrandLogo";
 import AnnouncementBar from "../components/AnnouncementBar";
 import { normalizeProductSizes, products as fallbackProducts, type Product } from "../data";
 import { useProducts } from "../hooks/useProducts";
@@ -43,7 +44,7 @@ const NavIcon = ({ name }: { name: "bag" | "menu" | "close" }) => {
 
 const Wordmark = () => (
   <Link aria-label="SHABA home" className="brand-mark text-sand" to="/">
-    <span aria-hidden="true" className="brand-logo-art" />
+    <BrandLogo />
   </Link>
 );
 

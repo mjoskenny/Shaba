@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import BrandLogo from "../components/BrandLogo";
 import { normalizeProductSizes, type Product } from "../data";
 import { adminApi, type OrderRecord, type StoreInsights } from "../lib/api";
 import { createSiteMediaEntry, getSiteMedia, getStoryContent, saveSiteMedia, saveStoryContent, siteMediaSections, type SiteMediaItem } from "../lib/site-content";
@@ -273,7 +274,7 @@ export default function AdminPage() {
         </div>
         <div className="flex items-center justify-center">
           <form className="w-full max-w-md rounded-3xl bg-sand p-8 text-forest sm:p-12" onSubmit={signIn}>
-            <div aria-hidden="true" className="brand-logo-art" />
+            <BrandLogo />
             <h2 className="mt-10 font-serif text-4xl">Admin sign in</h2>
             <p className="mt-3 text-sm leading-6 text-forest/60">Use an administrator account created in Supabase Authentication.</p>
             <label className="mt-8 block text-[10px] font-semibold uppercase tracking-[0.16em]">
