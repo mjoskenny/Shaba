@@ -306,7 +306,7 @@ export function ShopPage() {
           <div className="product-section-heading mb-10 flex flex-col justify-between gap-8 sm:flex-row sm:items-end">
             <div>
               <span className="eyebrow text-brass">SHABA <span aria-hidden="true">/</span> The collection</span>
-              <h3 className="mt-4 font-serif text-5xl text-forest sm:text-3xl">{audience} · {category}</h3>
+              <h3 className="mt-4 font-serif text-3xl text-forest sm:text-3xl">{audience} · {category}</h3>
             </div>
             <div className="flex flex-wrap items-center gap-7">
               <div className="flex items-center gap-2 sm:hidden" aria-label="Products per row on mobile">
