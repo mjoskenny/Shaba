@@ -18,8 +18,9 @@ const GridViewIcon = ({ columns }: { columns: 1 | 2 | 3 | 4 }) => (
 );
 
 export default function HomePage() {
-  const { products } = useProducts();
-  const [siteMedia, setSiteMedia] = useState(defaultSiteContent);
+  const { products, loading: productsLoading } = useProducts();
+  const [siteMedia, setSiteMedia] = useState<typeof defaultSiteContent>([]);
+  const [siteMediaLoaded, setSiteMediaLoaded] = useState(false);
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
   const [productColumns, setProductColumns] = useState<2 | 3 | 4>(3);
   const [mobileColumns, setMobileColumns] = useState<1 | 2>(2);
@@ -45,9 +46,15 @@ export default function HomePage() {
     const loadMedia = async () => {
       try {
         const items = await storeContentApi.siteMedia();
-        if (active && items.length) setSiteMedia(items);
+        if (active) {
+          setSiteMedia(items.length ? items : defaultSiteContent);
+          setSiteMediaLoaded(true);
+        }
       } catch {
-        // Keep the built-in images visible when the content API is unavailable.
+        if (active) {
+          setSiteMedia(defaultSiteContent);
+          setSiteMediaLoaded(true);
+        }
       }
     };
     void loadMedia();
@@ -63,13 +70,15 @@ export default function HomePage() {
   const visibleProducts = activeCategory === "All pieces"
     ? audienceProducts
     : audienceProducts.filter((product) => product.category === activeCategory);
-  const sectionImage = (section: SiteMediaSection) => siteMedia.find((item) => item.section === section)?.image;
-  const heroImage = sectionImage("hero") || "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=2200&q=88";
-  const womenAudienceImage = sectionImage("audience-women") || "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=1100&q=85";
-  const menAudienceImage = sectionImage("audience-men") || "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1100&q=85";
-  const mainFeatureImage = sectionImage("feature-main") || "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1500&q=85";
-  const secondaryFeatureImage = sectionImage("feature-secondary") || "https://images.unsplash.com/photo-1473188588951-666fce8e7c68?auto=format&fit=crop&w=1000&q=85";
-  const campaignImage = sectionImage("campaign") || "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1400&q=85";
+  const sectionImage = (section: SiteMediaSection) =>
+    siteMedia.find((item) => item.section === section)?.image ||
+    defaultSiteContent.find((item) => item.section === section)!.image;
+  const heroImage = sectionImage("hero");
+  const womenAudienceImage = sectionImage("audience-women");
+  const menAudienceImage = sectionImage("audience-men");
+  const mainFeatureImage = sectionImage("feature-main");
+  const secondaryFeatureImage = sectionImage("feature-secondary");
+  const campaignImage = sectionImage("campaign");
 
   const selectAudience = (nextAudience: "Women" | "Men") => {
     setAudience(nextAudience);
@@ -84,11 +93,11 @@ export default function HomePage() {
   return (
     <main className="home-page overflow-hidden bg-sand text-forest">
       <section className="home-minimal-hero relative isolate flex min-h-[620px] items-end overflow-hidden text-sand sm:min-h-[700px] lg:min-h-[min(780px,calc(100vh-3rem))]">
-        <img
+        {siteMediaLoaded && heroImage && <img
           alt="A considered look at contemporary African fashion"
           className="absolute inset-0 -z-20 size-full object-cover object-center"
           src={heroImage}
-        />
+        />}
         <div className="absolute inset-0 -z-10 bg-gradient-to-r from-forest/75 via-forest/25 to-transparent" />
         <div className="mx-auto w-full max-w-[1440px] px-5 pb-14 pt-40 sm:px-8 sm:pb-20 lg:px-14 lg:pb-24">
           <span className="home-minimal-kicker">SHABA CRAFTS <i /> MADE IN BURUNDI</span>
@@ -140,11 +149,11 @@ export default function HomePage() {
               key={item}
               onClick={() => selectAudience(item)}
             >
-              <img
+              {siteMediaLoaded && <img
                 alt=""
                 className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
                 src={index === 0 ? womenAudienceImage : menAudienceImage}
-              />
+              />}
               <span className="absolute inset-0 bg-gradient-to-t from-forest/70 via-forest/5 to-transparent" />
               <span className="absolute bottom-4 left-4 flex items-center gap-3 sm:bottom-7 sm:left-7">
                 <span className="text-2xl font-medium tracking-[-0.04em] sm:text-4xl">{item}</span>
@@ -199,10 +208,11 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className={`grid gap-x-3 gap-y-8 sm:grid-cols-2 sm:gap-x-5 sm:gap-y-10 ${mobileColumns === 1 ? "grid-cols-1" : "grid-cols-2"} ${productColumns === 2 ? "lg:grid-cols-2" : productColumns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
+          {productsLoading && <p className="py-10 text-center text-xs uppercase tracking-[0.18em] text-forest/50">Loading collection…</p>}
+          {!productsLoading && <div className={`grid gap-x-3 gap-y-8 sm:grid-cols-2 sm:gap-x-5 sm:gap-y-10 ${mobileColumns === 1 ? "grid-cols-1" : "grid-cols-2"} ${productColumns === 2 ? "lg:grid-cols-2" : productColumns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
             {visibleProducts.map((product) => <ProductCard key={product.slug} product={product} />)}
-          </div>
-          {!visibleProducts.length && <p className="py-16 text-center text-sm text-forest/55">More pieces coming soon.</p>}
+          </div>}
+          {!productsLoading && !visibleProducts.length && <p className="py-16 text-center text-sm text-forest/55">More pieces coming soon.</p>}
           <Link className="home-minimal-all mt-7 sm:hidden" to="/shop">View all pieces <Arrow /></Link>
         </div>
       </section>
@@ -218,7 +228,7 @@ export default function HomePage() {
           </div>
           <div className="grid gap-3 sm:grid-cols-[1.25fr_0.75fr] sm:gap-5">
             <Link className="home-feature-tile group relative min-h-[280px] overflow-hidden bg-forest text-sand sm:min-h-[440px]" to="/shop">
-              <img alt="Contemporary clothing in warm natural tones" className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]" src={mainFeatureImage} />
+              {siteMediaLoaded && mainFeatureImage && <img alt="Contemporary clothing in warm natural tones" className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]" src={mainFeatureImage} />}
               <span className="absolute inset-0 bg-gradient-to-t from-forest/75 via-forest/10 to-transparent" />
               <span className="absolute bottom-5 left-5 right-5 flex items-end justify-between gap-4 sm:bottom-8 sm:left-8 sm:right-8">
                 <span>
@@ -230,7 +240,7 @@ export default function HomePage() {
             </Link>
             <div className="grid gap-3 sm:gap-5">
               <Link className="home-feature-tile group relative min-h-[190px] overflow-hidden bg-brass text-sand sm:min-h-0" to="/shop">
-                <img alt="A considered leather accessory" className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" src={secondaryFeatureImage} />
+                {siteMediaLoaded && secondaryFeatureImage && <img alt="A considered leather accessory" className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" src={secondaryFeatureImage} />}
                 <span className="absolute inset-0 bg-gradient-to-t from-forest/75 via-transparent to-transparent" />
                 <span className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3 sm:bottom-6 sm:left-6 sm:right-6">
                   <span><span className="block text-[9px] uppercase tracking-[0.18em] text-sand/75">02 / Carry well</span><span className="mt-1 block text-2xl font-medium tracking-[-0.04em] sm:text-3xl">Everyday pieces</span></span>

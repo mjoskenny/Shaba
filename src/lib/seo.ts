@@ -1,5 +1,4 @@
 import { SHABA_BRAND } from "./brand";
-import { products } from "../data";
 
 const BASE_URL = "https://www.shabacrafts.store";
 const DEFAULT_IMAGE = `${BASE_URL}/shaba-wordmark-mask-trans.png?v=2`;
@@ -54,19 +53,6 @@ export function getSeoConfigFromPath(pathname: string): SeoConfig {
   const normalizedPath = pathname.split("?")[0].split("#")[0] || "/";
   const staticMatch = pageDefaults[normalizedPath];
   if (staticMatch) return staticMatch;
-
-  const productMatch = normalizedPath.match(/^\/products\/([^/]+)/);
-  if (productMatch) {
-    const product = products.find((item) => item.slug === productMatch[1]);
-    if (product) {
-      return {
-        title: `${product.name} | Shaba Crafts`,
-        description: `${product.description} Handmade in Burundi and designed for everyday wear and craftsmanship.`,
-        path: normalizedPath,
-        image: product.image,
-      };
-    }
-  }
 
   return {
     title: "Shaba Crafts | Handmade Clothing, Bags & Sandals in Burundi",

@@ -1,5 +1,4 @@
 import type { Product } from "../data";
-import { products as fallbackProducts } from "../data";
 import type { SiteMediaItem, StoryContent } from "./site-content";
 import { apiBase, assertSupabaseConfigured, supabase, supabaseAnonKey } from "./supabase";
 
@@ -26,7 +25,7 @@ export async function getProducts() {
   try {
     return await request<Product[]>("/products");
   } catch {
-    return fallbackProducts;
+    return [];
   }
 }
 
@@ -34,7 +33,7 @@ export async function getProduct(slug: string) {
   try {
     return await request<Product>(`/products/${slug}`);
   } catch {
-    return fallbackProducts.find((product) => product.slug === slug) ?? null;
+    return null;
   }
 }
 

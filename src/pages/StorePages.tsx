@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router"
 import ProductCard from "../components/ProductCard";
 import BrandLogo from "../components/BrandLogo";
 import AnnouncementBar from "../components/AnnouncementBar";
-import { normalizeProductSizes, products as fallbackProducts, type Product } from "../data";
+import { normalizeProductSizes, type Product } from "../data";
 import { useProducts } from "../hooks/useProducts";
 import { createOrder, getProduct, storeContentApi } from "../lib/api";
 import { addCartItem, clearCart, getCart, getCartCount, removeCartItem, updateCartItem, type CartItem } from "../lib/cart";
@@ -214,7 +214,6 @@ export function SiteLayout() {
         <div className="mx-auto mt-6 flex max-w-[1440px] justify-between text-[9px] uppercase tracking-[0.18em] text-sand/45">
           <span>© 2025 SHABA</span>
           <div className="flex items-center gap-5">
-            <span className="hidden normal-case tracking-normal sm:inline">A random browser ID helps us understand store visits; contact details are not collected.</span>
             <Link to="/refund-policy">Returns & exchanges</Link>
           </div>
         </div>
@@ -365,13 +364,13 @@ export function ShopPage() {
               </button>
             ))}
           </div>
-          {loading && <p className="mb-8 text-center text-xs uppercase tracking-[0.18em] text-forest/50">Refreshing collection</p>}
-          <div className={`grid ${mobileGridClass} ${desktopGridClass} gap-x-5 gap-y-12`}>
+          {loading && <p className="mb-8 text-center text-xs uppercase tracking-[0.18em] text-forest/50">Loading collection…</p>}
+          {!loading && <div className={`grid ${mobileGridClass} ${desktopGridClass} gap-x-5 gap-y-12`}>
             {visibleProducts.map((product) => (
               <ProductCard key={product.slug} product={product} />
             ))}
-          </div>
-          {!visibleProducts.length && (
+          </div>}
+          {!loading && !visibleProducts.length && (
             <div className="py-20 text-center">
               <h2 className="font-serif text-3xl">More pieces are coming.</h2>
               <p className="mt-4 text-sm text-forest/60">Try another category or collection.</p>
@@ -385,21 +384,22 @@ export function ShopPage() {
 
 export function ProductDetailPage() {
   const { slug } = useParams();
-  const [product, setProduct] = useState<Product | null>(
-    fallbackProducts.find((item) => item.slug === slug) ?? null,
-  );
+  const [productResult, setProductResult] = useState<{ slug: string; product: Product | null } | null>(null);
   const [activeImage, setActiveImage] = useState("");
   const [added, setAdded] = useState(false);
   const [selectedSize, setSelectedSize] = useState("");
+  const hasProductResult = productResult !== null && productResult.slug === slug;
+  const product = hasProductResult ? productResult.product : null;
 
   useEffect(() => {
     if (!slug) return;
     let active = true;
+    setProductResult(null);
     setSelectedSize("");
     setAdded(false);
     getProduct(slug).then((item) => {
       if (active) {
-        setProduct(item);
+        setProductResult({ slug, product: item });
         const sizes = normalizeProductSizes(item?.sizes);
         setSelectedSize(sizes.length === 1 ? sizes[0] : "");
         setActiveImage(item?.image ?? "");
@@ -414,7 +414,23 @@ export function ProductDetailPage() {
     if (product?.slug) void trackStoreEvent("product_view", { productSlug: product.slug });
   }, [product?.slug]);
 
-  if (!product) return <NotFoundPage />;
+  useEffect(() => {
+    if (!product) return;
+    applySeo({
+      title: `${product.name} | Shaba Crafts`,
+      description: `${product.description} Handmade in Burundi and designed for everyday wear and craftsmanship.`,
+      path: `/products/${product.slug}`,
+      image: product.image,
+    });
+  }, [product?.slug]);
+
+  if (!product) {
+    return hasProductResult ? <NotFoundPage /> : (
+      <main aria-label="Loading product" className="grid min-h-[65vh] place-items-center bg-sand px-5">
+        <p className="text-xs uppercase tracking-[0.18em] text-forest/55">Loading product…</p>
+      </main>
+    );
+  }
 
   const galleryImages = [...new Set([product.image, ...(product.images ?? [])].filter(Boolean))];
   const availableSizes = normalizeProductSizes(product.sizes);
@@ -490,6 +506,7 @@ export function ProductDetailPage() {
 
 export function StoryPage() {
   const [story, setStory] = useState(defaultStoryContent);
+  const [storyLoaded, setStoryLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -499,6 +516,8 @@ export function StoryPage() {
         if (active && content) setStory({ ...defaultStoryContent, ...content });
       } catch {
         // Keep the default story content available when the content API is unavailable.
+      } finally {
+        if (active) setStoryLoaded(true);
       }
     };
     void loadStory();
@@ -513,7 +532,7 @@ export function StoryPage() {
     <main>
       <PageIntro eyebrow={story.eyebrow} title={story.title} copy={story.intro} />
       <section className="grid lg:grid-cols-2">
-        <img alt="Green hills overlooking a lake in Burundi" className="min-h-[520px] size-full object-cover lg:min-h-[760px]" src={story.image} />
+        {storyLoaded ? <img alt="Green hills overlooking a lake in Burundi" className="min-h-[520px] size-full object-cover lg:min-h-[760px]" src={story.image} /> : <div aria-hidden="true" className="min-h-[520px] bg-forest/10 lg:min-h-[760px]" />}
         <div className="flex items-center px-7 py-20 sm:px-14 lg:px-20">
           <div className="max-w-xl">
             <span className="eyebrow text-brass">Designed from home</span>

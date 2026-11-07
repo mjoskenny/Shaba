@@ -6,7 +6,13 @@ import * as kv from "./kv_store.tsx";
 import { isAdminUser, normalizeAdminEmails } from "./admin_auth.js";
 const app = new Hono();
 const prefix = "/make-server-16e069d6";
-const allowedOrigins = (Deno.env.get("ALLOWED_ORIGINS") ?? "http://localhost:8443,http://localhost:8444").split(",").map((origin) => origin.trim()).filter(Boolean);
+const allowedOrigins = [...new Set([
+  "https://shabacrafts.store",
+  "https://www.shabacrafts.store",
+  "http://localhost:8443",
+  "http://localhost:8444",
+  ...(Deno.env.get("ALLOWED_ORIGINS") ?? "").split(","),
+].map((origin) => origin.trim()).filter(Boolean))];
 const rateLimitWindowMs = 60_000;
 const rateLimitMaxRequests = 60;
 const clientRequestTimestamps = new Map<string, number[]>();
@@ -87,57 +93,6 @@ app.get(`${prefix}/health`, (c) => {
   return c.json({ status: "ok" });
 });
 
-const starterProducts = [
-  {
-    slug: "bujumbura-cross",
-    name: "Bujumbura Cross",
-    category: "Sandals",
-    audience: ["Women", "Men"],
-    price: "145,000 BIF",
-    image: "https://images.unsplash.com/photo-1613662632164-7f2b081a5b46?auto=format&fit=crop&w=1200&q=88",
-    description: "A quietly confident sandal cut from full-grain leather, shaped for everyday movement and finished by hand in Bujumbura.",
-    inventory: 18,
-    published: true,
-    sizes: ["36", "37", "38", "39", "40", "41", "42"],
-  },
-  {
-    slug: "imboneza-satchel",
-    name: "Imboneza Satchel",
-    category: "Bags",
-    audience: ["Women"],
-    price: "320,000 BIF",
-    image: "https://images.unsplash.com/photo-1473188588951-666fce8e7c68?auto=format&fit=crop&w=1200&q=88",
-    description: "A structured daily satchel with considered compartments, solid brass hardware, and a rich patina that deepens over time.",
-    inventory: 9,
-    published: true,
-    sizes: ["One size"],
-  },
-  {
-    slug: "amahoro-wallet",
-    name: "Amahoro Wallet",
-    category: "Small goods",
-    audience: ["Men"],
-    price: "85,000 BIF",
-    image: "https://images.unsplash.com/photo-1635100299010-0410d7434a93?auto=format&fit=crop&w=1200&q=88",
-    description: "Slim, practical, and precisely stitched, the Amahoro carries the essentials without unnecessary bulk.",
-    inventory: 24,
-    published: true,
-    sizes: ["One size"],
-  },
-  {
-    slug: "ruzizi-carryall",
-    name: "Ruzizi Carryall",
-    category: "Bags",
-    audience: ["Women", "Men"],
-    price: "410,000 BIF",
-    image: "https://images.unsplash.com/photo-1525103504173-8dc1582c7430?auto=format&fit=crop&w=1200&q=88",
-    description: "A generous unisex carryall made for overnight journeys, with reinforced handles and an easy, enduring silhouette.",
-    inventory: 7,
-    published: true,
-    sizes: ["One size"],
-  },
-];
-
 const starterJournals = [
   {
     slug: "leather-that-lives",
@@ -177,13 +132,7 @@ function normalizedSizes(value: unknown): string[] {
 }
 
 async function ensureCatalog() {
-  const existing = await kv.getByPrefix("product:");
-  if (existing.length) return existing;
-  await kv.mset(
-    starterProducts.map((product) => `product:${product.slug}`),
-    starterProducts,
-  );
-  return starterProducts;
+  return kv.getByPrefix("product:");
 }
 
 async function ensureCategories() {

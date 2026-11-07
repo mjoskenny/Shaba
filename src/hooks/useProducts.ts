@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import type { Product } from "../data";
-import { products as fallbackProducts } from "../data";
 import { getProducts } from "../lib/api";
 
 export function useProducts() {
-  const [products, setProducts] = useState<Product[]>(fallbackProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
