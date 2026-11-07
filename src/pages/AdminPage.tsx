@@ -3,7 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import BrandLogo from "../components/BrandLogo";
 import { normalizeProductSizes, type Product } from "../data";
 import { adminApi, type OrderRecord, type StoreInsights } from "../lib/api";
-import { createSiteMediaEntry, defaultSiteContent, defaultStoryContent, getSiteMedia, getStoryContent, siteMediaSections, type SiteMediaItem } from "../lib/site-content";
+import { createSiteMediaEntry, defaultStoryContent, siteMediaSections, type SiteMediaItem } from "../lib/site-content";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const emptyProduct: Product = {
@@ -31,9 +31,9 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState("");
-  const [contentItems, setContentItems] = useState<SiteMediaItem[]>(getSiteMedia());
+  const [contentItems, setContentItems] = useState<SiteMediaItem[]>([]);
   const [contentDraft, setContentDraft] = useState<SiteMediaItem>(createSiteMediaEntry({ section: "hero" }));
-  const [storyContent, setStoryContent] = useState(getStoryContent());
+  const [storyContent, setStoryContent] = useState(defaultStoryContent);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [editing, setEditing] = useState<Product | null>(null);
   const [sizesInput, setSizesInput] = useState("");
@@ -56,7 +56,7 @@ export default function AdminPage() {
       setOrders(orderResult.value.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     }
     if (insightsResult.status === "fulfilled") setInsights(insightsResult.value);
-    if (contentResult.status === "fulfilled") setContentItems(contentResult.value.length ? contentResult.value : getSiteMedia());
+    if (contentResult.status === "fulfilled") setContentItems(contentResult.value);
     if (storyResult.status === "fulfilled" && storyResult.value) setStoryContent({ ...defaultStoryContent, ...storyResult.value });
 
     const dashboardError = [catalogResult, categoryResult, orderResult, insightsResult, contentResult, storyResult].find((result) => result.status === "rejected");
@@ -175,7 +175,7 @@ export default function AdminPage() {
     const nextItems = contentItems.filter((item) => item.id !== id);
     try {
       const savedItems = await adminApi.saveSiteMedia(nextItems);
-      setContentItems(savedItems.length ? savedItems : defaultSiteContent);
+      setContentItems(savedItems);
       setMessage("Media removed from the storefront.");
       if (contentDraft.id === id) resetContentDraft();
     } catch (error) {

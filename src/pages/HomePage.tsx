@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import ProductCard from "../components/ProductCard";
 import { useProducts } from "../hooks/useProducts";
 import { storeContentApi } from "../lib/api";
-import { defaultSiteContent, type SiteMediaSection } from "../lib/site-content";
+import type { SiteMediaSection } from "../lib/site-content";
 
 const Arrow = () => (
   <svg aria-hidden="true" className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
@@ -19,13 +19,15 @@ const GridViewIcon = ({ columns }: { columns: 1 | 2 | 3 | 4 }) => (
 
 export default function HomePage() {
   const { products, loading: productsLoading } = useProducts();
-  const [siteMedia, setSiteMedia] = useState<typeof defaultSiteContent>([]);
+  const [siteMedia, setSiteMedia] = useState<Awaited<ReturnType<typeof storeContentApi.siteMedia>>>([]);
   const [siteMediaLoaded, setSiteMediaLoaded] = useState(false);
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
   const [productColumns, setProductColumns] = useState<2 | 3 | 4>(3);
   const [mobileColumns, setMobileColumns] = useState<1 | 2>(2);
   const [activeCategory, setActiveCategory] = useState("All pieces");
   const [audience, setAudience] = useState<"Women" | "Men">("Women");
+
+  const isSafeImage = (value: string | undefined) => typeof value === "string" && value.trim().length > 0 && !/images\.unsplash\.com|source\.unsplash\.com|placeholder/i.test(value);
 
   useEffect(() => {
     const elements = document.querySelectorAll<HTMLElement>("[data-reveal]");
@@ -46,13 +48,13 @@ export default function HomePage() {
     const loadMedia = async () => {
       try {
         const items = await storeContentApi.siteMedia();
+        const cleanedItems = items.filter((item) => isSafeImage(item.image));
         if (active) {
-          setSiteMedia(items.length ? items : defaultSiteContent);
+          if (cleanedItems.length) setSiteMedia(cleanedItems);
           setSiteMediaLoaded(true);
         }
       } catch {
         if (active) {
-          setSiteMedia(defaultSiteContent);
           setSiteMediaLoaded(true);
         }
       }
@@ -70,9 +72,7 @@ export default function HomePage() {
   const visibleProducts = activeCategory === "All pieces"
     ? audienceProducts
     : audienceProducts.filter((product) => product.category === activeCategory);
-  const sectionImage = (section: SiteMediaSection) =>
-    siteMedia.find((item) => item.section === section)?.image ||
-    defaultSiteContent.find((item) => item.section === section)!.image;
+  const sectionImage = (section: SiteMediaSection) => siteMedia.find((item) => item.section === section)?.image;
   const heroImage = sectionImage("hero");
   const womenAudienceImage = sectionImage("audience-women");
   const menAudienceImage = sectionImage("audience-men");
@@ -149,7 +149,7 @@ export default function HomePage() {
               key={item}
               onClick={() => selectAudience(item)}
             >
-              {siteMediaLoaded && <img
+              {siteMediaLoaded && (index === 0 ? womenAudienceImage : menAudienceImage) && <img
                 alt=""
                 className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
                 src={index === 0 ? womenAudienceImage : menAudienceImage}

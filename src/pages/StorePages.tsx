@@ -532,7 +532,7 @@ export function StoryPage() {
     <main>
       <PageIntro eyebrow={story.eyebrow} title={story.title} copy={story.intro} />
       <section className="grid lg:grid-cols-2">
-        {storyLoaded ? <img alt="Green hills overlooking a lake in Burundi" className="min-h-[520px] size-full object-cover lg:min-h-[760px]" src={story.image} /> : <div aria-hidden="true" className="min-h-[520px] bg-forest/10 lg:min-h-[760px]" />}
+        {storyLoaded && story.image ? <img alt="Green hills overlooking a lake in Burundi" className="min-h-[520px] size-full object-cover lg:min-h-[760px]" src={story.image} /> : <div aria-hidden="true" className="min-h-[520px] bg-forest/10 lg:min-h-[760px]" />}
         <div className="flex items-center px-7 py-20 sm:px-14 lg:px-20">
           <div className="max-w-xl">
             <span className="eyebrow text-brass">Designed from home</span>

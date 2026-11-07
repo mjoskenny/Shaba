@@ -93,34 +93,27 @@ app.get(`${prefix}/health`, (c) => {
   return c.json({ status: "ok" });
 });
 
-const starterJournals = [
-  {
-    slug: "leather-that-lives",
-    category: "Materials",
-    title: "Why full-grain leather gets better with time",
-    excerpt: "A closer look at patina, natural character, and why we choose leather that records the life lived with it.",
-    image: "https://images.unsplash.com/photo-1496180317060-d2026272f138?auto=format&fit=crop&w=1400&q=88",
-    body: [
-      "Full-grain leather keeps the strongest, most expressive surface of the hide intact. Its marks and subtle variations are not defects; they are the beginning of a material that will become more personal with use.",
-      "Over time, sunlight, movement, and the oils from your hands deepen its tone and soften its structure. This evolving finish is called patina, and it is one of the reasons a well-made leather object can feel more valuable after years than it did on day one.",
-      "We select hides for strength, balance, and character, then finish them lightly so the material can continue to breathe and change. The result is an object that does not merely resist time—it responds to it.",
-    ],
-    published: true,
-  },
-  {
-    slug: "inside-the-bujumbura-workshop",
-    category: "Studio notes",
-    title: "Inside a day at the Bujumbura workshop",
-    excerpt: "From the first pattern to the last polished edge, follow the steady rhythm behind every SHABA piece.",
-    image: "https://images.unsplash.com/photo-1628483211662-9bcc692c46dc?auto=format&fit=crop&w=1400&q=88",
-    body: [
-      "The workshop begins quietly. Patterns are checked, hides are laid out, and every cut is planned before a blade meets leather.",
-      "The day moves between focused individual work and shared inspection. Edges are refined, hardware is set, and seams are tested by hand. Nothing is hurried because every later step depends on the accuracy of the one before it.",
-      "By evening, finished pieces sit beside work still in progress—a visible record of patient skill and collective attention.",
-    ],
-    published: true,
-  },
-];
+function isPlaceholderImageUrl(value: unknown): boolean {
+  return typeof value === "string" && /images\.unsplash\.com|source\.unsplash\.com|placeholder/i.test(value.trim());
+}
+
+function sanitizeSiteMediaItems(value: unknown): any[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item as Record<string, unknown>;
+    return typeof candidate.section === "string" && typeof candidate.image === "string" && candidate.image.trim().length > 0 && !isPlaceholderImageUrl(candidate.image);
+  });
+}
+
+function sanitizeStoryContent(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== "object") return null;
+  const story = value as Record<string, unknown>;
+  if (typeof story.image !== "string" || !story.image.trim() || isPlaceholderImageUrl(story.image)) {
+    return null;
+  }
+  return Object.fromEntries(Object.entries(story).map(([key, entry]) => [key, typeof entry === "string" ? entry : ""])) as Record<string, string>;
+}
 
 function normalizedSizes(value: unknown): string[] {
   const entries = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
@@ -150,12 +143,8 @@ async function ensureCategories() {
 
 async function ensureJournals() {
   const existing = await kv.getByPrefix("journal:");
-  if (existing.length) return existing;
-  await kv.mset(
-    starterJournals.map((journal) => `journal:${journal.slug}`),
-    starterJournals,
-  );
-  return starterJournals;
+  if (existing.length) return existing.filter((journal) => !isPlaceholderImageUrl(journal.image));
+  return [];
 }
 
 async function requireAdmin(c: any) {
@@ -213,7 +202,8 @@ app.get(`${prefix}/journals/:slug`, async (c) => {
 
 app.get(`${prefix}/site-content`, async (c) => {
   try {
-    return c.json(await kv.get("site-content:media") ?? []);
+    const stored = await kv.get("site-content:media");
+    return c.json(sanitizeSiteMediaItems(stored));
   } catch (error) {
     console.log("Site content load error", error);
     return c.json({ error: "Unable to load site content" }, 500);
@@ -222,7 +212,8 @@ app.get(`${prefix}/site-content`, async (c) => {
 
 app.get(`${prefix}/story-content`, async (c) => {
   try {
-    return c.json(await kv.get("site-content:story") ?? null);
+    const stored = await kv.get("site-content:story");
+    return c.json(sanitizeStoryContent(stored));
   } catch (error) {
     console.log("Story content load error", error);
     return c.json({ error: "Unable to load story content" }, 500);
@@ -360,7 +351,8 @@ app.get(`${prefix}/admin/categories`, async (c) => {
 app.get(`${prefix}/admin/site-content`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
   try {
-    return c.json(await kv.get("site-content:media") ?? []);
+    const stored = await kv.get("site-content:media");
+    return c.json(sanitizeSiteMediaItems(stored));
   } catch (error) {
     console.log("Admin site content load error", error);
     return c.json({ error: "Unable to load site content" }, 500);
@@ -371,13 +363,14 @@ app.put(`${prefix}/admin/site-content`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
   try {
     const input = await c.req.json();
-    if (!Array.isArray(input.items) || input.items.length > 100 || input.items.some((item: any) =>
+    const sanitizedItems = sanitizeSiteMediaItems(input.items);
+    if (!Array.isArray(input.items) || input.items.length > 100 || sanitizedItems.length !== input.items.length || input.items.some((item: any) =>
       !item || typeof item.id !== "string" || typeof item.section !== "string" ||
       typeof item.image !== "string" || !item.image.trim() ||
       !["hero", "audience-women", "audience-men", "feature-main", "feature-secondary", "campaign"].includes(item.section)
     )) return c.json({ error: "A valid list of site media items is required" }, 400);
-    await kv.set("site-content:media", input.items);
-    return c.json(input.items);
+    await kv.set("site-content:media", sanitizedItems);
+    return c.json(sanitizedItems);
   } catch (error) {
     console.log("Admin site content save error", error);
     return c.json({ error: "Unable to save site content" }, 500);
@@ -387,7 +380,8 @@ app.put(`${prefix}/admin/site-content`, async (c) => {
 app.get(`${prefix}/admin/story-content`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
   try {
-    return c.json(await kv.get("site-content:story") ?? null);
+    const stored = await kv.get("site-content:story");
+    return c.json(sanitizeStoryContent(stored));
   } catch (error) {
     console.log("Admin story content load error", error);
     return c.json({ error: "Unable to load story content" }, 500);
@@ -398,12 +392,13 @@ app.put(`${prefix}/admin/story-content`, async (c) => {
   if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
   try {
     const content = await c.req.json();
+    const sanitized = sanitizeStoryContent(content);
     const requiredFields = ["eyebrow", "title", "intro", "image", "secondaryTitle", "secondaryCopy", "secondaryCopyTwo", "valuesTitle", "futureTitle", "futureCopy"];
-    if (!content || requiredFields.some((field) => typeof content[field] !== "string")) {
+    if (!sanitized || requiredFields.some((field) => typeof sanitized[field] !== "string")) {
       return c.json({ error: "Complete story content is required" }, 400);
     }
-    await kv.set("site-content:story", content);
-    return c.json(content);
+    await kv.set("site-content:story", sanitized);
+    return c.json(sanitized);
   } catch (error) {
     console.log("Admin story content save error", error);
     return c.json({ error: "Unable to save story content" }, 500);
