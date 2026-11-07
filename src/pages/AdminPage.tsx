@@ -3,7 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import BrandLogo from "../components/BrandLogo";
 import { normalizeProductSizes, type Product } from "../data";
 import { adminApi, type OrderRecord, type StoreInsights } from "../lib/api";
-import { createSiteMediaEntry, getSiteMedia, getStoryContent, saveSiteMedia, saveStoryContent, siteMediaSections, type SiteMediaItem } from "../lib/site-content";
+import { createSiteMediaEntry, defaultSiteContent, defaultStoryContent, getSiteMedia, getStoryContent, siteMediaSections, type SiteMediaItem } from "../lib/site-content";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const emptyProduct: Product = {
@@ -25,12 +25,13 @@ export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState<"insights" | "products" | "categories" | "content" | "orders">("insights");
+  const [contentMode, setContentMode] = useState<"media" | "story">("media");
   const [insights, setInsights] = useState<StoreInsights | null>(null);
   const [insightsPeriod, setInsightsPeriod] = useState<7 | 30 | 90>(30);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState("");
-  const [contentItems, setContentItems] = useState<SiteMediaItem[]>([]);
+  const [contentItems, setContentItems] = useState<SiteMediaItem[]>(getSiteMedia());
   const [contentDraft, setContentDraft] = useState<SiteMediaItem>(createSiteMediaEntry({ section: "hero" }));
   const [storyContent, setStoryContent] = useState(getStoryContent());
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -40,11 +41,13 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
 
   const loadDashboard = async () => {
-    const [catalogResult, categoryResult, orderResult, insightsResult] = await Promise.allSettled([
+    const [catalogResult, categoryResult, orderResult, insightsResult, contentResult, storyResult] = await Promise.allSettled([
       adminApi.products(),
       adminApi.categories(),
       adminApi.orders(),
       adminApi.insights(insightsPeriod),
+      adminApi.siteMedia(),
+      adminApi.storyContent(),
     ]);
 
     if (catalogResult.status === "fulfilled") setProducts(catalogResult.value);
@@ -53,9 +56,10 @@ export default function AdminPage() {
       setOrders(orderResult.value.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     }
     if (insightsResult.status === "fulfilled") setInsights(insightsResult.value);
-    setContentItems(getSiteMedia());
+    if (contentResult.status === "fulfilled") setContentItems(contentResult.value.length ? contentResult.value : getSiteMedia());
+    if (storyResult.status === "fulfilled" && storyResult.value) setStoryContent({ ...defaultStoryContent, ...storyResult.value });
 
-    const dashboardError = [catalogResult, categoryResult, orderResult, insightsResult].find((result) => result.status === "rejected");
+    const dashboardError = [catalogResult, categoryResult, orderResult, insightsResult, contentResult, storyResult].find((result) => result.status === "rejected");
     setMessage(dashboardError?.status === "rejected"
       ? dashboardError.reason instanceof Error ? dashboardError.reason.message : "Unable to load dashboard"
       : "");
@@ -136,7 +140,7 @@ export default function AdminPage() {
 
   const resetContentDraft = () => setContentDraft({ ...createSiteMediaEntry({ section: "hero" }), id: "" });
 
-  const saveContentItem = (event: React.FormEvent) => {
+  const saveContentItem = async (event: React.FormEvent) => {
     event.preventDefault();
     const cleaned = {
       ...contentDraft,
@@ -152,27 +156,42 @@ export default function AdminPage() {
       return;
     }
 
-    const nextItems = contentDraft.id
-      ? contentItems.map((item) => item.id === contentDraft.id ? cleaned : item)
-      : [...contentItems, cleaned];
+    const remainingItems = contentItems.filter((item) => item.id !== cleaned.id);
+    const sectionPosition = remainingItems.findIndex((item) => item.section === cleaned.section);
+    remainingItems.splice(sectionPosition < 0 ? remainingItems.length : sectionPosition, 0, cleaned);
+    const nextItems = remainingItems;
 
-    saveSiteMedia(nextItems);
-    setContentItems(nextItems);
-    setMessage("");
-    resetContentDraft();
+    try {
+      const savedItems = await adminApi.saveSiteMedia(nextItems);
+      setContentItems(savedItems);
+      setMessage("Media saved and published to the storefront.");
+      resetContentDraft();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save site media");
+    }
   };
 
-  const removeContentItem = (id: string) => {
+  const removeContentItem = async (id: string) => {
     const nextItems = contentItems.filter((item) => item.id !== id);
-    saveSiteMedia(nextItems);
-    setContentItems(nextItems);
-    if (contentDraft.id === id) resetContentDraft();
+    try {
+      const savedItems = await adminApi.saveSiteMedia(nextItems);
+      setContentItems(savedItems.length ? savedItems : defaultSiteContent);
+      setMessage("Media removed from the storefront.");
+      if (contentDraft.id === id) resetContentDraft();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to remove site media");
+    }
   };
 
-  const saveStorySettings = (event: React.FormEvent) => {
+  const saveStorySettings = async (event: React.FormEvent) => {
     event.preventDefault();
-    saveStoryContent(storyContent);
-    setMessage("Story content saved.");
+    try {
+      const savedStory = await adminApi.saveStoryContent(storyContent);
+      setStoryContent(savedStory);
+      setMessage("Story content saved and published to the storefront.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save story content");
+    }
   };
 
   const updateOrderStatus = async (id: string, status: string) => {
@@ -442,7 +461,20 @@ export default function AdminPage() {
             </div>
           </section>
         ) : tab === "content" ? (
-          <section className="mt-8 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <section className="mt-8 space-y-6">
+            <div className="flex flex-wrap items-end justify-between gap-5 rounded-2xl bg-[#e7dfd3] p-5 sm:p-7">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Storefront content</p>
+                <h3 className="mt-1 font-serif text-3xl">Manage what visitors see</h3>
+                <p className="mt-2 text-xs text-forest/55">Changes are saved to the shared store and load on the public website.</p>
+              </div>
+              <div aria-label="Content type" className="flex rounded-full bg-white p-1" role="group">
+                <button aria-pressed={contentMode === "media"} className={`rounded-full px-5 py-3 text-xs font-semibold ${contentMode === "media" ? "bg-forest text-sand" : "text-forest/65"}`} onClick={() => setContentMode("media")} type="button">Homepage media</button>
+                <button aria-pressed={contentMode === "story"} className={`rounded-full px-5 py-3 text-xs font-semibold ${contentMode === "story" ? "bg-forest text-sand" : "text-forest/65"}`} onClick={() => setContentMode("story")} type="button">Our story</button>
+              </div>
+            </div>
+
+            {contentMode === "media" ? <div className="grid items-start gap-6 xl:grid-cols-[0.9fr_1.1fr]">
             <form className="rounded-2xl bg-white p-5 sm:p-7" onSubmit={saveContentItem}>
               <div className="flex items-end justify-between gap-3">
                 <div>
@@ -478,6 +510,7 @@ export default function AdminPage() {
                   }}
                   type="file"
                 />
+                {contentDraft.image && <img alt={contentDraft.alt || contentDraft.title || "Selected media preview"} className="mt-3 h-44 w-full rounded-xl object-cover" src={contentDraft.image} />}
               </div>
               <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Link
                 <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, href: event.target.value })} value={contentDraft.href} />
@@ -485,7 +518,7 @@ export default function AdminPage() {
               <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Alt text
                 <input className="mt-2 w-full border-b border-forest/20 bg-transparent py-3 text-sm outline-none focus:border-forest" onChange={(event) => setContentDraft({ ...contentDraft, alt: event.target.value })} value={contentDraft.alt} />
               </label>
-              <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest" type="submit">{contentItems.some((item) => item.id === contentDraft.id) ? "Save media" : "Add media"}</button>
+              <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest disabled:opacity-50" disabled={uploading} type="submit">{uploading ? "Uploading…" : contentItems.some((item) => item.id === contentDraft.id) ? "Save and publish" : "Add and publish"}</button>
             </form>
 
             <div className="space-y-3">
@@ -517,8 +550,7 @@ export default function AdminPage() {
                 </article>
               ))}
             </div>
-
-            <form className="rounded-2xl bg-white p-5 sm:p-7" onSubmit={saveStorySettings}>
+            </div> : <form className="mx-auto max-w-4xl rounded-2xl bg-white p-5 sm:p-7" onSubmit={saveStorySettings}>
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-brass">Story page</p>
               <h3 className="mt-1 font-serif text-3xl">Edit narrative</h3>
               <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Eyebrow
@@ -570,8 +602,8 @@ export default function AdminPage() {
               <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.14em]">Future copy
                 <textarea className="mt-2 min-h-24 w-full rounded-xl border border-forest/15 bg-transparent p-4 text-sm leading-6" onChange={(event) => setStoryContent({ ...storyContent, futureCopy: event.target.value })} value={storyContent.futureCopy} />
               </label>
-              <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest" type="submit">Save story</button>
-            </form>
+              <button className="mt-8 w-full rounded-full bg-forest px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-sand hover:bg-gold hover:text-forest" disabled={uploading} type="submit">Save and publish story</button>
+            </form>}
           </section>
         ) : (
           <section className="mt-8 space-y-4">

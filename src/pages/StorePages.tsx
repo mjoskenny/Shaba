@@ -5,11 +5,11 @@ import BrandLogo from "../components/BrandLogo";
 import AnnouncementBar from "../components/AnnouncementBar";
 import { normalizeProductSizes, products as fallbackProducts, type Product } from "../data";
 import { useProducts } from "../hooks/useProducts";
-import { createOrder, getProduct } from "../lib/api";
+import { createOrder, getProduct, storeContentApi } from "../lib/api";
 import { addCartItem, clearCart, getCart, getCartCount, removeCartItem, updateCartItem, type CartItem } from "../lib/cart";
 import { SHABA_BRAND } from "../lib/brand";
 import { trackStoreEvent } from "../lib/analytics";
-import { getStoryContent } from "../lib/site-content";
+import { defaultStoryContent } from "../lib/site-content";
 import { applySeo, buildOrganizationSchema, getSeoConfigFromPath } from "../lib/seo";
 
 const Arrow = ({ diagonal = false }: { diagonal?: boolean }) => (
@@ -307,7 +307,7 @@ export function ShopPage() {
           <div className="product-section-heading mb-10 flex flex-col justify-between gap-8 sm:flex-row sm:items-end">
             <div>
               <span className="eyebrow text-brass">SHABA <span aria-hidden="true">/</span> The collection</span>
-              <h2 className="mt-4 font-serif text-5xl text-forest sm:text-6xl">{audience} · {category}</h2>
+              <h3 className="mt-4 font-serif text-5xl text-forest sm:text-3xl">{audience} · {category}</h3>
             </div>
             <div className="flex flex-wrap items-center gap-7">
               <div className="flex items-center gap-2 sm:hidden" aria-label="Products per row on mobile">
@@ -449,7 +449,7 @@ export function ProductDetailPage() {
         <div className="product-detail-copy-wrap flex items-start px-6 py-10 sm:px-12 sm:py-14 lg:sticky lg:top-24 lg:min-h-[calc(100vh-6rem)] lg:items-center lg:px-16 xl:px-24">
           <div className="product-detail-copy w-full max-w-lg">
             <span className="home-section-label text-brass">{product.category} <span aria-hidden="true">/</span> SHABA, BURUNDI</span>
-            <h1 className="mt-4 max-w-xl text-5xl font-medium leading-[0.96] tracking-[-0.06em] sm:text-6xl lg:text-7xl">{product.name}</h1>
+            <h3 className="mt-4 max-w-xl text-5xl font-medium leading-[0.96] tracking-[-0.06em] sm:text-6xl lg:text-7xl">{product.name}</h3>
             <p className="product-detail-price mt-5 text-lg font-medium tracking-[-0.02em]">{product.price}</p>
             <p className="mt-6 max-w-md text-sm leading-7 text-forest/65">{product.description}</p>
             <div className="product-size-picker mt-7 py-5">
@@ -489,7 +489,25 @@ export function ProductDetailPage() {
 }
 
 export function StoryPage() {
-  const story = getStoryContent();
+  const [story, setStory] = useState(defaultStoryContent);
+
+  useEffect(() => {
+    let active = true;
+    const loadStory = async () => {
+      try {
+        const content = await storeContentApi.storyContent();
+        if (active && content) setStory({ ...defaultStoryContent, ...content });
+      } catch {
+        // Keep the default story content available when the content API is unavailable.
+      }
+    };
+    void loadStory();
+    const refresh = window.setInterval(loadStory, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(refresh);
+    };
+  }, []);
 
   return (
     <main>

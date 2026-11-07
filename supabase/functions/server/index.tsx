@@ -262,6 +262,24 @@ app.get(`${prefix}/journals/:slug`, async (c) => {
   return journal ? c.json(journal) : c.json({ error: "Journal not found" }, 404);
 });
 
+app.get(`${prefix}/site-content`, async (c) => {
+  try {
+    return c.json(await kv.get("site-content:media") ?? []);
+  } catch (error) {
+    console.log("Site content load error", error);
+    return c.json({ error: "Unable to load site content" }, 500);
+  }
+});
+
+app.get(`${prefix}/story-content`, async (c) => {
+  try {
+    return c.json(await kv.get("site-content:story") ?? null);
+  } catch (error) {
+    console.log("Story content load error", error);
+    return c.json({ error: "Unable to load story content" }, 500);
+  }
+});
+
 app.post(`${prefix}/analytics/events`, async (c) => {
   try {
     const input = await c.req.json();
@@ -387,6 +405,59 @@ app.get(`${prefix}/admin/categories`, async (c) => {
   } catch (error) {
     console.log("Category load error", error);
     return c.json({ error: "Unable to load categories" }, 500);
+  }
+});
+
+app.get(`${prefix}/admin/site-content`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  try {
+    return c.json(await kv.get("site-content:media") ?? []);
+  } catch (error) {
+    console.log("Admin site content load error", error);
+    return c.json({ error: "Unable to load site content" }, 500);
+  }
+});
+
+app.put(`${prefix}/admin/site-content`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  try {
+    const input = await c.req.json();
+    if (!Array.isArray(input.items) || input.items.length > 100 || input.items.some((item: any) =>
+      !item || typeof item.id !== "string" || typeof item.section !== "string" ||
+      typeof item.image !== "string" || !item.image.trim() ||
+      !["hero", "audience-women", "audience-men", "feature-main", "feature-secondary", "campaign"].includes(item.section)
+    )) return c.json({ error: "A valid list of site media items is required" }, 400);
+    await kv.set("site-content:media", input.items);
+    return c.json(input.items);
+  } catch (error) {
+    console.log("Admin site content save error", error);
+    return c.json({ error: "Unable to save site content" }, 500);
+  }
+});
+
+app.get(`${prefix}/admin/story-content`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  try {
+    return c.json(await kv.get("site-content:story") ?? null);
+  } catch (error) {
+    console.log("Admin story content load error", error);
+    return c.json({ error: "Unable to load story content" }, 500);
+  }
+});
+
+app.put(`${prefix}/admin/story-content`, async (c) => {
+  if (!(await requireAdmin(c))) return c.json({ error: "Authentication required" }, 401);
+  try {
+    const content = await c.req.json();
+    const requiredFields = ["eyebrow", "title", "intro", "image", "secondaryTitle", "secondaryCopy", "secondaryCopyTwo", "valuesTitle", "futureTitle", "futureCopy"];
+    if (!content || requiredFields.some((field) => typeof content[field] !== "string")) {
+      return c.json({ error: "Complete story content is required" }, 400);
+    }
+    await kv.set("site-content:story", content);
+    return c.json(content);
+  } catch (error) {
+    console.log("Admin story content save error", error);
+    return c.json({ error: "Unable to save story content" }, 500);
   }
 });
 

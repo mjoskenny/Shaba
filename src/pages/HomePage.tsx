@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import ProductCard from "../components/ProductCard";
 import { useProducts } from "../hooks/useProducts";
-import { getSectionMedia } from "../lib/site-content";
+import { storeContentApi } from "../lib/api";
+import { defaultSiteContent, type SiteMediaSection } from "../lib/site-content";
 
 const Arrow = () => (
   <svg aria-hidden="true" className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
@@ -18,6 +19,7 @@ const GridViewIcon = ({ columns }: { columns: 1 | 2 | 3 | 4 }) => (
 
 export default function HomePage() {
   const { products } = useProducts();
+  const [siteMedia, setSiteMedia] = useState(defaultSiteContent);
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
   const [productColumns, setProductColumns] = useState<2 | 3 | 4>(3);
   const [mobileColumns, setMobileColumns] = useState<1 | 2>(2);
@@ -38,17 +40,36 @@ export default function HomePage() {
     return () => observer.disconnect();
   }, [activeCategory, audience]);
 
+  useEffect(() => {
+    let active = true;
+    const loadMedia = async () => {
+      try {
+        const items = await storeContentApi.siteMedia();
+        if (active && items.length) setSiteMedia(items);
+      } catch {
+        // Keep the built-in images visible when the content API is unavailable.
+      }
+    };
+    void loadMedia();
+    const refresh = window.setInterval(loadMedia, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(refresh);
+    };
+  }, []);
+
   const audienceProducts = products.filter((product) => product.audience.includes(audience));
   const categories = Array.from(new Set(audienceProducts.map((product) => product.category)));
   const visibleProducts = activeCategory === "All pieces"
     ? audienceProducts
     : audienceProducts.filter((product) => product.category === activeCategory);
-  const heroImage = getSectionMedia("hero")[0]?.image ?? "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=2200&q=88";
-  const womenAudienceImage = getSectionMedia("audience-women")[0]?.image ?? "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=1100&q=85";
-  const menAudienceImage = getSectionMedia("audience-men")[0]?.image ?? "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1100&q=85";
-  const mainFeatureImage = getSectionMedia("feature-main")[0]?.image ?? "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1500&q=85";
-  const secondaryFeatureImage = getSectionMedia("feature-secondary")[0]?.image ?? "https://images.unsplash.com/photo-1473188588951-666fce8e7c68?auto=format&fit=crop&w=1000&q=85";
-  const campaignImage = getSectionMedia("campaign")[0]?.image ?? "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1400&q=85";
+  const sectionImage = (section: SiteMediaSection) => siteMedia.find((item) => item.section === section)?.image;
+  const heroImage = sectionImage("hero") || "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=2200&q=88";
+  const womenAudienceImage = sectionImage("audience-women") || "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=1100&q=85";
+  const menAudienceImage = sectionImage("audience-men") || "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1100&q=85";
+  const mainFeatureImage = sectionImage("feature-main") || "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1500&q=85";
+  const secondaryFeatureImage = sectionImage("feature-secondary") || "https://images.unsplash.com/photo-1473188588951-666fce8e7c68?auto=format&fit=crop&w=1000&q=85";
+  const campaignImage = sectionImage("campaign") || "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1400&q=85";
 
   const selectAudience = (nextAudience: "Women" | "Men") => {
     setAudience(nextAudience);
@@ -139,7 +160,7 @@ export default function HomePage() {
           <div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end sm:mb-9">
             <div>
               <span className="home-minimal-label">The collection</span>
-              <h2 className="mt-2 text-3xl font-medium tracking-[-0.05em] sm:text-5xl">New and considered</h2>
+              <h3 className="mt-2 text-3xl font-medium tracking-[-0.05em] sm:text-3xl">New and considered</h3>
             </div>
             <div className="flex items-center justify-between gap-4 sm:justify-end">
               <div aria-label="Filter by category" className="home-minimal-filters flex max-w-[70vw] gap-1 overflow-x-auto sm:max-w-none">

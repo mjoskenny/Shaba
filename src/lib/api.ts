@@ -1,5 +1,6 @@
 import type { Product } from "../data";
 import { products as fallbackProducts } from "../data";
+import type { SiteMediaItem, StoryContent } from "./site-content";
 import { apiBase, assertSupabaseConfigured, supabase, supabaseAnonKey } from "./supabase";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -38,6 +39,16 @@ export async function getProduct(slug: string) {
 }
 
 export const adminApi = {
+  siteMedia: () => request<SiteMediaItem[]>("/admin/site-content"),
+  saveSiteMedia: (items: SiteMediaItem[]) => request<SiteMediaItem[]>("/admin/site-content", {
+    method: "PUT",
+    body: JSON.stringify({ items }),
+  }),
+  storyContent: () => request<StoryContent | null>("/admin/story-content"),
+  saveStoryContent: (content: StoryContent) => request<StoryContent>("/admin/story-content", {
+    method: "PUT",
+    body: JSON.stringify(content),
+  }),
   products: () => request<Product[]>("/admin/products"),
   insights: (days: 7 | 30 | 90) => request<StoreInsights>(`/admin/insights?days=${days}`),
   categories: () => request<CategoryRecord[]>("/admin/categories"),
@@ -71,6 +82,11 @@ export const adminApi = {
     if (!response.ok) throw new Error(body.error ?? body.message ?? "Upload failed");
     return body as { url: string };
   },
+};
+
+export const storeContentApi = {
+  siteMedia: () => request<SiteMediaItem[]>("/site-content"),
+  storyContent: () => request<StoryContent | null>("/story-content"),
 };
 
 export type StoreInsights = {
